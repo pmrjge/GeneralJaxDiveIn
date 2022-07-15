@@ -288,7 +288,7 @@ class TransformerThunk(hk.Module):
         x = hk.Linear(64, w_init=w_init, b_init=hki.Constant(1e-6))(x)
         x = jnn.gelu(x, approximate=False)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
-        return hk.get_parameter('p_scale', shape=(1,)) * jnn.sigmoid(hk.Linear(1, w_init=w_init, b_init=hki.Constant(1e-6))(x)) + hk.get_parameter('p_bias', shape=(1,))
+        return hk.get_parameter('p_scale', shape=(1,), init=w_init) * jnn.sigmoid(hk.Linear(1, w_init=w_init, b_init=hki.Constant(1e-6))(x)) + hk.get_parameter('p_bias', shape=(1,), init=hki.Constant(1e-4))
 
 def build_forward_fn(num_layers, time2vec_dim, num_heads, head_size, ff_dim=None, dropout=0.5):
     def forward_fn(x: jnp.ndarray, is_training: bool = True) -> jnp.ndarray:
