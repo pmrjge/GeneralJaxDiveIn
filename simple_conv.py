@@ -52,7 +52,7 @@ class ConvNetHybrid(hk.Module):
         self.dropout = 0.5
         scale_init = hki.Constant(1.0)
         offset_init = hki.Constant(1e-8)
-        self.bn = lambda: hk.BatchNorm(True, True, 0.99, scale_init=scale_init, offset_init=offset_init)
+        self.bn = lambda: hk.BatchNorm(True, True, 0.98)
 
     def __call__(self, inputs, is_training=True):
         dropout = self.dropout if is_training else 0.0
@@ -76,17 +76,23 @@ class ConvNetHybrid(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
-        x = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = hk.Conv2D(output_channels=192, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                       b_init=hki.Constant(1e-6))(x)
         x = self.bn()(x, is_training)
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
-        x = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
-                      b_init=hki.Constant(1e-6))(x)
-        x = self.bn()(x, is_training)
-        x = jnn.gelu(x, approximate=False)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        # x = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        #               b_init=hki.Constant(1e-6))(x)
+        # x = self.bn()(x, is_training)
+        # x = jnn.gelu(x, approximate=False)
+        # x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        #
+        # x = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        #               b_init=hki.Constant(1e-6))(x)
+        # x = self.bn()(x, is_training)
+        # x = jnn.gelu(x, approximate=False)
+        # x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
         # x = hk.Conv2D(256, 3, 1, w_init=lc_init, b_init=hki.Constant(1e-6))(x)
         # x = self.bn()(x, is_training)
@@ -100,8 +106,8 @@ class ConvNetHybrid(hk.Module):
 
         y = jnp.mean(x, axis=(1, 2))
 
-        lc_init = hki.VarianceScaling(2.0, 'fan_in', 'truncated_normal')
-        y = hk.Linear(128, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
+        lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
+        y = hk.Linear(64, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
         y = hk.dropout(hk.next_rng_key(), dropout, y)
         y = jnn.gelu(y, approximate=False)
 
@@ -181,11 +187,11 @@ def replicate_tree(t, num_devices):
 # training loop
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.005
+learning_rate = 0.001
 batch_size = 168
 num_layers = -1
 dropout = 0.6
-max_steps = 1600
+max_steps = 1000
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(0)
 
