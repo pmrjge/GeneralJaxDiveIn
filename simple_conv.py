@@ -82,6 +82,18 @@ class ConvNetHybrid(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
+        x = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                      b_init=hki.Constant(1e-6))(x)
+        x = self.bn()(x, is_training)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        x = hk.Conv2D(output_channels=384, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                      b_init=hki.Constant(1e-6))(x)
+        x = self.bn()(x, is_training)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
         # x = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
         #               b_init=hki.Constant(1e-6))(x)
         # x = self.bn()(x, is_training)
@@ -107,7 +119,7 @@ class ConvNetHybrid(hk.Module):
         y = jnp.mean(x, axis=(1, 2))
 
         lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
-        y = hk.Linear(64, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
+        y = hk.Linear(128, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
         y = hk.dropout(hk.next_rng_key(), dropout, y)
         y = jnn.gelu(y, approximate=False)
 

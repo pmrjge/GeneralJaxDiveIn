@@ -177,30 +177,8 @@ def load_boost():
 
     return X_train_scaled, y_train_log, X_test_scaled, df_test
 
-
-def load_time(f1='./data/time/sales_train.csv', f2='./data/time/test.csv'):
-    train_ds = pd.read_csv(f1)
-    test_ds = pd.read_csv(f2)
-    monthly_data = train_ds.pivot_table(index = ['shop_id','item_id'], values = ['item_cnt_day'], columns = ['date_block_num'], fill_value = 0, aggfunc='sum')
-    monthly_data.reset_index(inplace = True)
-    train_data = monthly_data.drop(columns= ['shop_id','item_id'], level=0)
-    train_data.fillna(0,inplace = True)
-
-    y_train = train_data.values[:,-1:].clip(0, 20)
-
-    sc = StandardScaler()
-    x_train = sc.fit_transform(train_data.values[:,:-1])
-
-    test_rows = monthly_data.merge(test_ds, on = ['item_id','shop_id'], how = 'right')
-    x_test = test_rows.drop(test_rows.columns[:5], axis=1).drop('ID', axis=1)
-    x_test.fillna(0,inplace = True)
-
-    x_test = sc.transform(x_test)
-
-    return x_train, y_train, x_test, test_ds
-
 def main():
-    x, y, x_test, test_ds = load_time()
+    x, y, x_test, test_ds = load_boost()
 
     print("Examples :::: ", x.shape)
     print("Examples :::: ", y.shape)
