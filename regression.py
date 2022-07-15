@@ -202,7 +202,7 @@ def main():
     logging.info(f"Computing predictions...................")
     result = model.predict(x_test)
 
-    output = pd.DataFrame({'ID': test_ds['ID'], 'item_cnt_month': result.clip(0, 20).ravel()})
+    output = pd.DataFrame({'ID': test_ds['ID'], 'SalePrice': result})
     output.to_csv('./data/submission.csv', index=False)
 
 if __name__ == "__main__":

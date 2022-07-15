@@ -48,15 +48,14 @@ def main():
     logging.info(f"Fitting boosting algorithm.................")
 
     model = XGBRegressor(n_estimators=4096, max_depth=4, subsample=0.8, colsample_bytree=0.8)
-    #cv = RepeatedKFold(n_splits=4, n_repeats=2, random_state=1)
-    #print(sklearn.metrics.get_scorer_names())
+    cv = RepeatedKFold(n_splits=4, n_repeats=1, random_state=1)
 
-    #scores = cross_val_score(model, x, y, scoring='neg_root_mean_squared_error', cv=cv, n_jobs=-1)
+    scores = cross_val_score(model, x, y, scoring='neg_root_mean_squared_error', cv=cv, n_jobs=-1)
 
-    #scores = np.absolute(scores)
+    scores = np.absolute(scores)
 
-    #logging.info('Fit results.........................')
-    #print('Mean Sqrt Square Error %.3f (%.3f)' % (scores.mean(), scores.std()))
+    logging.info('Fit results.........................')
+    print('Mean Sqrt Square Error %.3f (%.3f)' % (scores.mean(), scores.std()))
 
     model.fit(x, y)
 
