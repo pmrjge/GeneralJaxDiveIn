@@ -26,8 +26,8 @@ def load_dataset(filename='./data/fashion_mnist/fashion-mnist_train.csv', filena
     test_x = test.values[:, 1:]
     test_y = test.values[:, 0]
 
-    train_x = (train_x - 128.0) / 255.0
-    test_x = (test_x - 128.0) / 255.0
+    train_x = train_x / 255.0
+    test_x = test_x / 255.0
 
     train_x = train_x.reshape((-1, 28, 28, 1))
     test_x = test_x.reshape((-1, 28, 28, 1))
@@ -210,6 +210,7 @@ rng = jr.PRNGKey(111)
 x, y, test, test_labels = load_dataset()
 
 print("Number of training examples :::::: ", x.shape[0])
+print("Number of testing examples :::::: ", test.shape[0])
 
 rng, rng_key = jr.split(rng)
 
@@ -281,6 +282,4 @@ for j in range(count):
     logits, _ = fn(params, state, rng, test[a:b, :, :, :], is_training=False)
     res[a:b] = np.array(jnp.argmax(jnn.softmax(logits), axis=1), dtype=np.int64)
 
-df = pd.DataFrame({'ImageId': np.arange(1, n1 + 1, dtype=np.int64), 'Label': res})
-
-df.to_csv('./data/results.csv', index=False)
+print("Accuracy:::::::: ", np.mean(res == np.array(test_labels, dtype=np.int32)))
