@@ -49,7 +49,7 @@ def get_generator_parallel(x, y, rng_key, batch_size, num_devices):
 class ConvNetHybrid(hk.Module):
     def __init__(self, dropout=0.5):
         super(ConvNetHybrid, self).__init__()
-        self.dropout = 0.5
+        self.dropout = dropout
         scale_init = hki.Constant(1.0)
         offset_init = hki.Constant(1e-8)
         self.bn = lambda: hk.BatchNorm(True, True, 0.98)
@@ -76,11 +76,23 @@ class ConvNetHybrid(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
+        # x = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        #               b_init=hki.Constant(1e-6))(x)
+        # x = self.bn()(x, is_training)
+        # x = jnn.gelu(x, approximate=False)
+        # x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
         x = hk.Conv2D(output_channels=192, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                       b_init=hki.Constant(1e-6))(x)
         x = self.bn()(x, is_training)
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        # x = hk.Conv2D(output_channels=192, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        #               b_init=hki.Constant(1e-6))(x)
+        # x = self.bn()(x, is_training)
+        # x = jnn.gelu(x, approximate=False)
+        # x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
         x = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                       b_init=hki.Constant(1e-6))(x)
@@ -88,11 +100,6 @@ class ConvNetHybrid(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
-        x = hk.Conv2D(output_channels=256, kernel_shape=5, stride=1, padding="SAME", w_init=lc_init,
-                      b_init=hki.Constant(1e-6))(x)
-        x = self.bn()(x, is_training)
-        x = jnn.gelu(x, approximate=True)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
         # x = hk.Conv2D(output_channels=384, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
         #               b_init=hki.Constant(1e-6))(x)
@@ -125,7 +132,7 @@ class ConvNetHybrid(hk.Module):
         y = jnp.mean(x, axis=(1, 2))
 
         lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
-        y = hk.Linear(64, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
+        y = hk.Linear(128, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
         y = hk.dropout(hk.next_rng_key(), dropout, y)
         y = jnn.gelu(y, approximate=False)
 
@@ -162,7 +169,7 @@ def build_forward_fn(num_layers, dropout=0.5, num_classes=10):
 def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True, num_classes: int = 10):
     y_pred, state = forward_fn(params, state, rng, x, is_training)
 
-    l2_loss = 0.5 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
+    l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     y_hot = jnn.one_hot(y, num_classes=num_classes)
     return jnp.mean(optax.softmax_cross_entropy(y_pred, y_hot)) + 1e-4 * l2_loss, state
 
@@ -205,11 +212,11 @@ def replicate_tree(t, num_devices):
 # training loop
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.0005
+learning_rate = 0.001
 batch_size = 168
 num_layers = -1
 dropout = 0.6
-max_steps = 1200
+max_steps = 500
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
@@ -227,7 +234,7 @@ forward_fn = hk.transform_with_state(forward_fn)
 forward_apply = forward_fn.apply
 loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=250, decay_rate=0.99)
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=400, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
