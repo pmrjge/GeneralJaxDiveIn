@@ -16,13 +16,24 @@ import optax
 import pandas as pd
 
 
-def load_dataset():
-    train_x = np.load('./data/fashion_mnist/train_x.npy')
-    train_y = np.load('./data/fashion_mnist/train_y.npy')
-    test = np.load('./data/fashion_mnist/test_x.npy')
-    test_y = np.load('./data/fashion_mnist/test_y.npy')
+def load_dataset(filename='./data/fashion_mnist/fashion-mnist_train.csv', filename1='./data/fashion_mnist/fashion-mnist_test.csv'):
+    train_data = pd.read_csv(filename)
+    test = pd.read_csv(filename1)
 
-    return jnp.array(train_x), jnp.array(train_y, dtype=jnp.int32), jnp.array(test), jnp.array(test_y, dtype=jnp.int32)
+    train_y = train_data.values[:, 0]
+    train_x = train_data.values[:, 1:]
+
+    test_x = test.values[:, 1:]
+    test_y = test.values[:, 0]
+
+    train_x = (train_x - 128.0) / 255.0
+    test_x = (test_x - 128.0) / 255.0
+
+    train_x = train_x.reshape((-1, 28, 28, 1))
+    test_x = test_x.reshape((-1, 28, 28, 1))
+
+    return jnp.array(train_x), jnp.array(train_y, dtype=jnp.int32), jnp.array(test_x), jnp.array(test_y, dtype=jnp.float32)
+    
 
 
 def get_generator_parallel(x, y, rng_key, batch_size, num_devices):
@@ -136,9 +147,7 @@ class ConvNetHybrid(hk.Module):
 
 def build_forward_fn(dropout=0.5):
     def forward_fn(x: jnp.ndarray, is_training: bool = True) -> jnp.ndarray:
-        n = ConvNetHybrid(dropout)
-
-        return n(x, is_training=is_training)
+        return ConvNetHybrid(dropout)(x, is_training=is_training)
 
     return forward_fn
 
@@ -191,16 +200,16 @@ def replicate_tree(t, num_devices):
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
 learning_rate = 0.001
-batch_size = 168
+batch_size = 120
+num_layers = -1
 dropout = 0.6
-max_steps = 500
+max_steps = 1000
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
 x, y, test, test_labels = load_dataset()
 
 print("Number of training examples :::::: ", x.shape[0])
-print("Number of testing examples :::::: ", test.shape[0])
 
 rng, rng_key = jr.split(rng)
 
@@ -272,4 +281,6 @@ for j in range(count):
     logits, _ = fn(params, state, rng, test[a:b, :, :, :], is_training=False)
     res[a:b] = np.array(jnp.argmax(jnn.softmax(logits), axis=1), dtype=np.int64)
 
-print("Accuracy :::::::::: ", np.mean(res == np.array(test_labels, dtype=np.int32)) * 100)
+df = pd.DataFrame({'ImageId': np.arange(1, n1 + 1, dtype=np.int64), 'Label': res})
+
+df.to_csv('./data/results.csv', index=False)
