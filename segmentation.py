@@ -57,3 +57,26 @@ def mask_to_rle(mask, orig_dim=160):
     runs[1::2] -= runs[::2]
     
     return ' '.join(str(x) for x in runs)
+
+class TrainLoader:
+    def __init__(self):
+        self.paths = train["id"].apply(lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff").values.tolist()
+        self.img_size = 3000
+
+    def size(self):
+        return train.shape[0]
+
+    def get_sample(self, idx):
+        path = self.paths[idx]
+        image = Image.open(str(path))
+        image = image.resize((self.img_size, self.img_size))
+        image = np.array(image).astype(float)
+        image = (image - image.min()) / (image.max() - image.min())
+        image = jnp.array(image)
+
+        organ = jnp.array([train.organ.iloc8idx])
+
+        label = rle_to_mask(train.rle[idx], train.img_width[idx], self.img_size)
+        label = jnp.array(label)
+
+        return image, organ, label
