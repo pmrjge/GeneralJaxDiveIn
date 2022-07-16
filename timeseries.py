@@ -47,8 +47,8 @@ def main():
 
     logging.info(f"Fitting boosting algorithm.................")
 
-    model = XGBRegressor(n_estimators=4096, max_depth=4, subsample=0.8, colsample_bytree=0.8)
-    cv = RepeatedKFold(n_splits=4, n_repeats=1, random_state=1)
+    model = XGBRegressor(eval_metric='rmse',n_estimators=4096, max_depth=4, eta=0.01, subsample=0.8, colsample_bytree=0.8)
+    cv = RepeatedKFold(n_splits=8, n_repeats=1, random_state=1)
 
     scores = cross_val_score(model, x, y, scoring='neg_root_mean_squared_error', cv=cv, n_jobs=-1)
 

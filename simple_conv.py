@@ -88,11 +88,17 @@ class ConvNetHybrid(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
-        x = hk.Conv2D(output_channels=384, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = hk.Conv2D(output_channels=256, kernel_shape=5, stride=1, padding="SAME", w_init=lc_init,
                       b_init=hki.Constant(1e-6))(x)
         x = self.bn()(x, is_training)
-        x = jnn.gelu(x, approximate=False)
+        x = jnn.gelu(x, approximate=True)
         x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        # x = hk.Conv2D(output_channels=384, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        #               b_init=hki.Constant(1e-6))(x)
+        # x = self.bn()(x, is_training)
+        # x = jnn.gelu(x, approximate=False)
+        # x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
 
         # x = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
         #               b_init=hki.Constant(1e-6))(x)
@@ -119,7 +125,7 @@ class ConvNetHybrid(hk.Module):
         y = jnp.mean(x, axis=(1, 2))
 
         lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
-        y = hk.Linear(128, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
+        y = hk.Linear(64, w_init=lc_init, b_init=hki.Constant(1e-6))(y)
         y = hk.dropout(hk.next_rng_key(), dropout, y)
         y = jnn.gelu(y, approximate=False)
 
@@ -199,13 +205,13 @@ def replicate_tree(t, num_devices):
 # training loop
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.001
+learning_rate = 0.0005
 batch_size = 168
 num_layers = -1
 dropout = 0.6
-max_steps = 1000
+max_steps = 1200
 num_devices = jax.local_device_count()
-rng = jr.PRNGKey(0)
+rng = jr.PRNGKey(111)
 
 x, y, test = load_dataset()
 
@@ -221,11 +227,17 @@ forward_fn = hk.transform_with_state(forward_fn)
 forward_apply = forward_fn.apply
 loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=250, decay_rate=0.99)
+
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
-    # optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    optax.radam(learning_rate=learning_rate)
+    #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
+    #optax.scale_by_radam(),
+    optax.scale_by_adam(),
+    optax.scale_by_schedule(scheduler),
+    optax.scale(-1.0)
 )
+
 updater = GradientUpdater(forward_fn.init, loss_fn, optimizer)
 
 logging.info('Initializing parameters...')
@@ -233,7 +245,7 @@ logging.info('Initializing parameters...')
 rng1, rng = jr.split(rng)
 a = next(train_dataset)
 w, z = a
-num_steps, rng, params, state, opt_state = updater.init(rng1, w[0, :, :, :])
+num_steps, rng2, params, state, opt_state = updater.init(rng1, w[0, :, :, :])
 
 rng1, rng = jr.split(rng)
 params_multi_device = params
