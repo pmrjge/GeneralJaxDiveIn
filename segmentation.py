@@ -165,9 +165,9 @@ class ConvInverse(hk.Module):
 
         x1, x2, x3, x4, x5, x6, x7, x8, x_reduced = x
 
-        val = hk.Conv2DTranspose(4096, 1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(x_reduced)
+        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x_reduced)
         zcat = jnp.concatenate([val, x8], axis=3)
-        val = hk.Conv2D(output_channels=4096, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=2048, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
@@ -177,21 +177,21 @@ class ConvInverse(hk.Module):
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x6], axis=3)
-        val = hk.Conv2D(output_channels=2048, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
-        val = self.bn()(val, is_training)
-        val = jnn.gelu(val)
-
         val = hk.Conv2DTranspose(1024, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x5], axis=3)
+        zcat = jnp.concatenate([val, x6], axis=3)
         val = hk.Conv2D(output_channels=1024, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(512, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x4], axis=3)
+        zcat = jnp.concatenate([val, x5], axis=3)
         val = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = self.bn()(val, is_training)
+        val = jnn.gelu(val)
+
+        val = hk.Conv2DTranspose(256, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        zcat = jnp.concatenate([val, x4], axis=3)
+        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
@@ -201,19 +201,14 @@ class ConvInverse(hk.Module):
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(256, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x2], axis=3)
-        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
-        val = self.bn()(val, is_training)
-        val = jnn.gelu(val)
-
         val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x1], axis=3)
+        zcat = jnp.concatenate([val, x2], axis=3)
         val = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        zcat = jnp.concatenate([val, x1], axis=3)
         val = hk.Conv2D(output_channels=1, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
         val = self.bn()(val, is_training)
 
@@ -233,7 +228,7 @@ class SimpleUNet(hk.Module):
 
         x1, x2, x3, x4, x5, x6, x7, x8 = ConvSimplifier()(x, is_training)
 
-        x_reduced = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)
+        x_reduced = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x8)
         x_reduced = hk.dropout(hk.next_rng_key(), dropout, x_reduced)
         x_reduced = jnn.gelu(x_reduced)
 
