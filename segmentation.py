@@ -27,14 +27,14 @@ def string_to_retrieve_data(x):
     return f"./data/segmentation/train_images/{x}.tiff"
 
 def rle2mask(mask_rle, shape=(1536,1536)):
-    s = mask_rle.split()
-    starts, lengths = [np.asarray(x, dtype=int) for x in (s[0::2], s[1::2])]
-    starts -= 1
+    s = np.asarray(mask_rle.split(), dtype=int)
+    starts = s[0::2] - 1
+    lengths = s[1::2]
     ends = starts + lengths
-    img = np.zeros(shape[0]*shape[1], dtype=np.uint8)
+    img = np.zeros(shape[0]*shape[1], dtype=np.int32)
     for lo, hi in zip(starts, ends):
         img[lo:hi] = 1
-    return img.reshape(shape).T
+    return img.reshape(shape).T 
 
 class TrainLoader:
     def __init__(self):
@@ -105,7 +105,7 @@ def bgenerator(rng_key, batch_size, num_devices):
 def dice_loss(inputs, gtr, smooth=1e-6):
     s1 = jnp.sum(gtr)
     s2 = jnp.sum(inputs)
-    intersect = jnp.sum(jnp.dot(gtr, inputs))
+    intersect = jnp.sum(gtr * inputs)
     return jnp.mean(1 - ((2 * intersect + smooth) / (s1 + s2 + smooth)))
 
 
