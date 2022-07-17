@@ -59,7 +59,7 @@ class TrainLoader:
 
 import multiprocessing
 
-batch_size = 4
+batch_size = 8
 num_cpus = min([max([1,int(multiprocessing.cpu_count() * 0.8)]), int(batch_size * 0.8)])
 
 tl = TrainLoader()
@@ -293,10 +293,62 @@ def replicate_tree(t, num_devices):
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
 learning_rate = 0.001
-batch_size = 4
+batch_size = 2
 dropout = 0.5
-max_steps = 8000
+max_steps = 1000
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
-train_loader = TrainLoader()
+print("Number of training examples :::::: ", tl.size())
+
+rng, rng_key = jr.split(rng)
+
+train_dataset = bgenerator(rng_key, batch_size=batch_size, num_devices=num_devices)
+
+
+forward_fn = build_forward_fn(dropout)
+forward_fn = hk.transform_with_state(forward_fn)
+
+forward_apply = forward_fn.apply
+loss_fn = ft.partial(lm_loss_fn, forward_apply)
+
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=1000, decay_rate=0.99)
+
+optimizer = optax.chain(
+    optax.adaptive_grad_clip(grad_clip_value),
+    #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
+    optax.scale_by_radam(),
+    #optax.scale_by_adam(),
+    optax.scale_by_schedule(scheduler),
+    optax.scale(-1.0)
+)
+
+updater = GradientUpdater(forward_fn.init, loss_fn, optimizer)
+
+logging.info('Initializing parameters........................')
+
+rng1, rng = jr.split(rng)
+x, y = next(train_dataset)
+
+num_steps, rng2, params, state, opt_state = updater.init(rng1, x[0, :, :, :, :])
+
+rng1, rng = jr.split(rng)
+params_multi_device = params
+opt_state_multi_device = opt_state
+num_steps_replicated = replicate_tree(num_steps, num_devices)
+rng_replicated = rng1
+state_multi_device = state
+
+batch_update = jax.pmap(updater.update, axis_name='j', in_axes=(0, None, None, None, None, 0, 0),
+                        out_axes=(0, None, None, None, None, 0))
+
+logging.info('Starting train loop ++++++++...')
+
+for i, (imgs, masks) in zip(range(max_steps), train_dataset):
+    if (i + 1) % 2 == 0:
+        logging.info(f'Step {i} computing forward-backward pass')
+    num_steps_replicated, rng_replicated, params_multi_device, state_multi_device, opt_state_multi_device, metrics = batch_update(
+        num_steps_replicated, rng_replicated, params_multi_device, state_multi_device, opt_state_multi_device, imgs, masks)
+
+    if (i + 1) % 2 == 0:
+        logging.info(f'At step {i} the loss is {metrics}')
