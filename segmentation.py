@@ -21,6 +21,8 @@ import cv2
 from PIL import Image
 
 train = pd.read_csv('/kaggle/input/hubmap-organ-segmentation/train.csv')
+#string_to_retrieve_data = lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff"
+string_to_retrieve_data = lambda x: f"./data/segmentation/train_images/{x}.tiff"
 
 def get_mask(image_id, size):
     row = train.loc[train['id'] == image_id].squeeze()
@@ -43,7 +45,7 @@ def get_mask(image_id, size):
 
 class TrainLoader:
     def __init__(self):
-        self.paths = train["id"].apply(lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff").values.tolist()
+        self.paths = train["id"].apply(lambda x: string_to_retrieve_data(x)).values.tolist()
         self.img_size = 3000
 
     def size(self):
@@ -84,13 +86,11 @@ def get_generator_parallel(rng_key, batch_size, num_devices):
         
         x, o, y = zip(*outputs)
 
-        x = jnp.vstack(x, dtype=jnp.float32)
+        x = jnp.stack(x, axis=0)
 
-        o = jnp.vstack(o, dtype=jnp.int32)
+        y = jnp.stack(y, axis=0)
 
-        y = jnp.vstack(y)
-
-        return x, o, y
+        return x, y
 
     def batch_generator():
         n = x.shape[0]
@@ -101,8 +101,10 @@ def get_generator_parallel(rng_key, batch_size, num_devices):
             key, k1 = jax.random.split(key)
             perm = jax.random.choice(k1, n, shape=(batch_size,))
 
-            x, o, y = get_data(tl, perm)
+            x, y = get_data(tl, perm)
 
             yield x.reshape(num_devices, kk, *x.shape[1:]), y.reshape(num_devices, kk, *y.shape[1:])
 
     return batch_generator()
+
+
