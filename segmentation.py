@@ -20,28 +20,21 @@ import tifffile
 import cv2
 from PIL import Image
 
-train = pd.read_csv('/kaggle/input/hubmap-organ-segmentation/train.csv')
+#train = pd.read_csv('/kaggle/input/hubmap-organ-segmentation/train.csv')
+train = pd.read_csv('./data/segmentation/train.csv')
 #string_to_retrieve_data = lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff"
-string_to_retrieve_data = lambda x: f"./data/segmentation/train_images/{x}.tiff"
+def string_to_retrieve_data(x):
+    return f"./data/segmentation/train_images/{x}.tiff"
 
-def get_mask(image_id, size):
-    row = train.loc[train['id'] == image_id].squeeze()
-    h, w = row[['img_height', 'img_width']]
-    mask = np.zeros(shape=[h * w], dtype=np.int32)
-    s = row['rle'].split()
-    starts, lengths = [np.asarray(x, dtype=int) for x in (s[0:][::2], s[1:][::2])]
-
+def rle2mask(mask_rle, shape=(3000,3000)):
+    s = mask_rle.split()
+    starts, lengths = [np.asarray(x, dtype=int) for x in (s[0::2], s[1::2])]
     starts -= 1
     ends = starts + lengths
+    img = np.zeros(shape[0]*shape[1], dtype=np.uint8)
     for lo, hi in zip(starts, ends):
-        mask[lo : hi] = 1
-    mask = mask.reshape([h, w]).T
-
-    mask = cv2.resize(mask, [size, size], interpolation=cv2.INTER_CUBIC).astype(np.int32)
-
-    mask = np.expand_dims(mask, axis=2)
-        
-    return mask
+        img[lo:hi] = 1
+    return img.reshape(shape).T
 
 class TrainLoader:
     def __init__(self):
@@ -54,37 +47,37 @@ class TrainLoader:
     def get_sample(self, idx):
         path = self.paths[idx]
         image = Image.open(str(path))
-        image = cv2.resize(image, [self.img_size, self.img_size], interpolation=cv2.INTER_CUBIC).astype(np.int32)
+        image = image.resize([self.img_size, self.img_size])
         image = np.array(image).astype(float)
         image = (image - image.min()) / (image.max() - image.min())
-        image = jnp.array(image)
+        image =  (image - 128.0) / 255.0
 
-        label = get_mask(idx, self.img_size)
-        label = jnp.array(label)
+        label = rle2mask(train.rle[idx])
 
         return image, label
 
 
 import multiprocessing
 
-num_cpus = max([1,int(multiprocessing.cpu_count() * 0.7)])
+batch_size = 8
+num_cpus = min([max([1,int(multiprocessing.cpu_count() * 0.7)]), int(batch_size * 0.8)])
 
+tl = TrainLoader()
 
-def get_generator_parallel(rng_key, batch_size, num_devices):
+def compute_el(idx):
+    return tl.get_sample(idx)
 
-
-    def get_data(tl, perm):
+def get_data(perm):
         pool = multiprocessing.Pool(processes=num_cpus)
 
         perm = np.array(perm).tolist()
-        m = lambda p: tl.get_sample(p)
-
-        outputs_async = pool.map_async(m, perm)
+        
+        outputs_async = pool.map_async(compute_el, perm)
         pool.close()
         pool.join()
         outputs = outputs_async.get()
         
-        x, o, y = zip(*outputs)
+        x, y = zip(*outputs)
 
         x = jnp.stack(x, axis=0)
 
@@ -92,19 +85,36 @@ def get_generator_parallel(rng_key, batch_size, num_devices):
 
         return x, y
 
+
+def bgenerator(rng_key, batch_size, num_devices):
+
     def batch_generator():
-        n = x.shape[0]
+        n = tl.size()
         key = rng_key
         kk = batch_size // num_devices
-        tl = TrainLoader()
         while True:
             key, k1 = jax.random.split(key)
             perm = jax.random.choice(k1, n, shape=(batch_size,))
 
-            x, y = get_data(tl, perm)
+            x, y = get_data(perm)
 
             yield x.reshape(num_devices, kk, *x.shape[1:]), y.reshape(num_devices, kk, *y.shape[1:])
 
     return batch_generator()
+
+
+rng = jr.PRNGKey(0)
+
+rng_key, rng = jr.split(rng)
+num_devices = jax.local_device_count()
+
+generator = bgenerator(rng_key, batch_size, num_devices)
+
+data = next(generator)
+
+x, y = data
+
+print(x.shape)
+print(y.shape)
 
 
