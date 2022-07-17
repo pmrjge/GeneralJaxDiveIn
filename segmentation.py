@@ -50,7 +50,7 @@ class TrainLoader:
         image = image.resize([self.img_size, self.img_size])
         image = np.array(image).astype(float)
         image = (image - image.min()) / (image.max() - image.min())
-        image =  (image - 128.0) / 255.0
+        
 
         label = rle2mask(train.rle[idx])
 
@@ -60,7 +60,7 @@ class TrainLoader:
 import multiprocessing
 
 batch_size = 8
-num_cpus = min([max([1,int(multiprocessing.cpu_count() * 0.7)]), int(batch_size * 0.8)])
+num_cpus = min([max([1,int(multiprocessing.cpu_count() * 0.8)]), int(batch_size * 0.8)])
 
 tl = TrainLoader()
 
@@ -102,19 +102,70 @@ def bgenerator(rng_key, batch_size, num_devices):
 
     return batch_generator()
 
+def dice_loss(inputs, gtr, smooth=1e-6):
+    s1 = jnp.sum(gtr)
+    s2 = jnp.sum(inputs)
+    intersect = jnp.sum(jnp.dot(gtr, inputs))
+    return jnp.mean(1 - ((2 * intersect + smooth) / (s1 + s2 + smooth)))
 
-rng = jr.PRNGKey(0)
 
-rng_key, rng = jr.split(rng)
-num_devices = jax.local_device_count()
+class ConvSimplifier(hk.Module):
+    def __init__(self):
+        super().__init__()
+        self.bn = lambda: hk.BatchNorm(True, True, 0.98)
 
-generator = bgenerator(rng_key, batch_size, num_devices)
+    def __call__(self, x, is_training):
+        w_init = hki.VarianceScaling(1.0)
+        b_init = hki.Constant(1e-6)
+        
+        x1 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x1 = self.bn()(x1, is_training)
+        x1 = jnn.gelu(x1)
 
-data = next(generator)
+        x2 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x2 = self.bn()(x2, is_training)
+        x2 = jnn.gelu(x2)
 
-x, y = data
+        x3 = hk.Conv2D(256, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x2)
+        x3 = self.bn()(x3, is_training)
+        x3 = jnn.gelu(x3)
 
-print(x.shape)
-print(y.shape)
+        x4 = hk.Conv2D(256, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x3)
+        x4 = self.bn()(x4, is_training)
+        x4 = jnn.gelu(x4)
+
+        x5 = hk.Conv2D(512, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x4)
+        x5 = self.bn()(x5, is_training)
+        x5 = jnn.gelu(x5)
+
+
+        x6 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        x6 = self.bn()(x6, is_training)
+        x6 = jnn.gelu(x6)
+
+        x7 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        x7 = self.bn()(x7, is_training)
+        x7 = jnn.gelu(x7)
+
+        x8 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x7)
+        x8 = self.bn()(x8, is_training)
+        x8 = jnn.gelu(x8)
+
+        return x1, x2, x3, x4, x5, x6, x7, x8
+
+
+class ConvInverse(hk.Module):
+    def __init__(self):
+        super().__init__()
+        self.bn = lambda: hk.BatchNorm(True, True, 0.99)
+
+    def __call__(self, x, is_training):
+        w_init = hki.VarianceScaling(1.0)
+        b_init = hki.Constant(1e-6)
+
+        x1, x2, x3, x4, x5, x_reduced = x
+
+
+
 
 
