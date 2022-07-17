@@ -26,7 +26,7 @@ train = pd.read_csv('./data/segmentation/train.csv')
 def string_to_retrieve_data(x):
     return f"./data/segmentation/train_images/{x}.tiff"
 
-def rle2mask(mask_rle, shape=(3000,3000)):
+def rle2mask(mask_rle, shape=(1536,1536)):
     s = mask_rle.split()
     starts, lengths = [np.asarray(x, dtype=int) for x in (s[0::2], s[1::2])]
     starts -= 1
@@ -39,7 +39,7 @@ def rle2mask(mask_rle, shape=(3000,3000)):
 class TrainLoader:
     def __init__(self):
         self.paths = train["id"].apply(lambda x: string_to_retrieve_data(x)).values.tolist()
-        self.img_size = 3000
+        self.img_size = 1536
 
     def size(self):
         return train.shape[0]
@@ -138,12 +138,11 @@ class ConvSimplifier(hk.Module):
         x5 = self.bn()(x5, is_training)
         x5 = jnn.gelu(x5)
 
-
         x6 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x5)
         x6 = self.bn()(x6, is_training)
         x6 = jnn.gelu(x6)
 
-        x7 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        x7 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
         x7 = self.bn()(x7, is_training)
         x7 = jnn.gelu(x7)
 
@@ -163,17 +162,11 @@ class ConvInverse(hk.Module):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
 
-        x1, x2, x3, x4, x5, x6, x7, x8, x_reduced = x
+        x1, x2, x3, x4, x5, x6, x7, x8 = x
 
-        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x_reduced)
-        zcat = jnp.concatenate([val, x8], axis=3)
-        val = hk.Conv2D(output_channels=2048, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
-        val = self.bn()(val, is_training)
-        val = jnn.gelu(val)
-
-        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
         zcat = jnp.concatenate([val, x7], axis=3)
-        val = hk.Conv2D(output_channels=2048, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=2048, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
@@ -183,15 +176,15 @@ class ConvInverse(hk.Module):
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(512, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2DTranspose(1024, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x5], axis=3)
-        val = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=1024, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(256, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2DTranspose(512, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x4], axis=3)
-        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
@@ -201,14 +194,19 @@ class ConvInverse(hk.Module):
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2DTranspose(256, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x2], axis=3)
-        val = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x1], axis=3)
+        val = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = self.bn()(val, is_training)
+        val = jnn.gelu(val)
+
+        val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         val = hk.Conv2D(output_channels=1, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
         val = self.bn()(val, is_training)
 
@@ -226,13 +224,9 @@ class SimpleUNet(hk.Module):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
 
-        x1, x2, x3, x4, x5, x6, x7, x8 = ConvSimplifier()(x, is_training)
+        x = ConvSimplifier()(x, is_training)
 
-        x_reduced = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x8)
-        x_reduced = hk.dropout(hk.next_rng_key(), dropout, x_reduced)
-        x_reduced = jnn.gelu(x_reduced)
-
-        mask = ConvInverse()((x1, x2, x3, x4, x5, x6, x7, x8, x_reduced), is_training)
+        mask = ConvInverse()(x, is_training)
 
         return mask
 
@@ -248,7 +242,8 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
     y_pred, state = forward_fn(params, state, rng, x, is_training)
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
-    return optax.sigmoid_binary_cross_entropy(y_pred, y) + dice_loss(y_pred, y, smooth=1e-6) + 1e-4 * l2_loss, state
+    #return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
+    return dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
 
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
