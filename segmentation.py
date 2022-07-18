@@ -41,7 +41,7 @@ def rle2mask(mask_rle, shape, dims=(1536,1536)):
             length = int(s[2*i+1])
             mask[start:start+length] = 1 + m
     mask = mask.reshape(shape).T
-    mask = mask.expand_dims(axis=2)
+    mask = np.expand_dims(mask, axis=2)
     mask = resize_tensor(mask)
 
     return mask
@@ -117,7 +117,7 @@ def bgenerator(rng_key, batch_size, num_devices):
 
 def dice_loss(inputs, gtr, smooth=1e-6):
     inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
-    gtr = einops.rearrange(gtr, 'b c h t -> b (c h t)')
+    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
     s1 = jnp.sum(gtr)
     s2 = jnp.sum(inputs)
     intersect = jnp.sum(gtr * inputs)
@@ -298,7 +298,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.001
+learning_rate = 0.01
 batch_size = 2
 dropout = 0.5
 max_steps = 1000
