@@ -22,19 +22,29 @@ from PIL import Image
 
 #train = pd.read_csv('/kaggle/input/hubmap-organ-segmentation/train.csv')
 train = pd.read_csv('./data/segmentation/train.csv')
+
 #string_to_retrieve_data = lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff"
 def string_to_retrieve_data(x):
     return f"./data/segmentation/train_images/{x}.tiff"
 
-def rle2mask(mask_rle, shape=(1536,1536)):
-    s = np.asarray(mask_rle.split(), dtype=int)
-    starts = s[0::2] - 1
-    lengths = s[1::2]
-    ends = starts + lengths
-    img = np.zeros(shape[0]*shape[1], dtype=np.int32)
-    for lo, hi in zip(starts, ends):
-        img[lo:hi] = 1
-    return img.reshape(shape).T 
+
+def resize_tensor(tensor, dims=(1536, 1536)):
+    return cv2.resize(tensor, [dims[0], dims[1]], interpolation=cv2.INTER_CUBIC).astype(np.uint8)
+
+def rle2mask(mask_rle, shape, dims=(1536,1536)):
+    mask = np.zeros(shape[0]*shape[1], dtype=np.uint8)
+    for m,enc in enumerate(mask_rle):
+        if isinstance(enc,float) and np.isnan(enc): continue
+        s = enc.split()
+        for i in range(len(s)//2):
+            start = int(s[2*i]) - 1
+            length = int(s[2*i+1])
+            mask[start:start+length] = 1 + m
+    mask = mask.reshape(shape).T
+    mask = mask.expand_dims(axis=2)
+    mask = resize_tensor(mask)
+
+    return mask
 
 class TrainLoader:
     def __init__(self):
@@ -52,7 +62,10 @@ class TrainLoader:
         image = (image - image.min()) / (image.max() - image.min())
         
 
-        label = rle2mask(train.rle[idx])
+        encs = train.rle[idx]
+        width = train.img_width[idx]
+        height = train.img_height[idx]
+        label = rle2mask(encs, (width, height))
 
         return image, label
 
@@ -104,8 +117,7 @@ def bgenerator(rng_key, batch_size, num_devices):
 
 def dice_loss(inputs, gtr, smooth=1e-6):
     inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
-    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
-    
+    gtr = einops.rearrange(gtr, 'b c h t -> b (c h t)')
     s1 = jnp.sum(gtr)
     s2 = jnp.sum(inputs)
     intersect = jnp.sum(gtr * inputs)
@@ -247,7 +259,7 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     #return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
-    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
+    return dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
 
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
@@ -286,7 +298,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.0003
+learning_rate = 0.001
 batch_size = 2
 dropout = 0.5
 max_steps = 1000
