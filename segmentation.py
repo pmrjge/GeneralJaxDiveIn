@@ -103,10 +103,14 @@ def bgenerator(rng_key, batch_size, num_devices):
     return batch_generator()
 
 def dice_loss(inputs, gtr, smooth=1e-6):
+    inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
+    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
+    
     s1 = jnp.sum(gtr)
     s2 = jnp.sum(inputs)
     intersect = jnp.sum(gtr * inputs)
-    return jnp.mean(1 - ((2 * intersect + smooth) / (s1 + s2 + smooth)))
+    dice = (2 * intersect + smooth) / (s1 + s2 + smooth)
+    return jnp.mean(1 - dice)
 
 
 class ConvSimplifier(hk.Module):
@@ -243,7 +247,7 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     #return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
-    return dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
+    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
 
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
@@ -282,7 +286,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.001
+learning_rate = 0.0003
 batch_size = 2
 dropout = 0.5
 max_steps = 1000
