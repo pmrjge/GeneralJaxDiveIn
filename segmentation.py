@@ -115,16 +115,6 @@ def bgenerator(rng_key, batch_size, num_devices):
 
     return batch_generator()
 
-def dice_loss(inputs, gtr, smooth=1e-6):
-    inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
-    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
-    s1 = jnp.sum(gtr)
-    s2 = jnp.sum(inputs)
-    intersect = jnp.sum(gtr * inputs)
-    dice = (2 * intersect + smooth) / (s1 + s2 + smooth)
-    return jnp.mean(1 - dice)
-
-
 class ConvSimplifier(hk.Module):
     def __init__(self):
         super().__init__()
@@ -247,6 +237,16 @@ class SimpleUNet(hk.Module):
         return mask
 
 
+def dice_loss(inputs, gtr, smooth=1e-6):
+    inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
+    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
+    s1 = jnp.sum(gtr, axis=1)
+    s2 = jnp.sum(inputs, axis=1)
+    intersect = jnp.sum(gtr * inputs, axis=1)
+    dice = (2 * intersect + smooth) / (s1 + s2 + smooth)
+    return jnp.mean(1 - dice)
+
+
 def build_forward_fn(dropout=0.5):
     def forward_fn(x: jnp.ndarray, is_training: bool = True) -> jnp.ndarray:
         return SimpleUNet(dropout)(x, is_training=is_training)
@@ -259,7 +259,7 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     #return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
-    return dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
+    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
 
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
