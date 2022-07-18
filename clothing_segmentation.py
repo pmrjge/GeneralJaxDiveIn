@@ -197,6 +197,7 @@ class SimpleUNet(hk.Module):
     def __init__(self, dropout=0.4, name: Optional[str] = None):
         super().__init__(name)
         self.dropout = dropout
+        self.bn = lambda: hk.BatchNorm(True, True, 0.95)
 
     def __call__(self, x, is_training):
         dropout = self.dropout if is_training else 0.0
@@ -206,7 +207,21 @@ class SimpleUNet(hk.Module):
 
         x = ConvSimplifier()(x, is_training)
 
-        mask = ConvInverse()(x, is_training)
+        x1, x2, x3, x4, x5, x6, x7, x8 = x
+
+        x = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        x = self.bn()(x, is_training)
+        x = jnn.gelu(x)
+        x = hk.Conv2D(8192, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x = self.bn()(x, is_training)
+        x = jnn.gelu(x)
+        x = hk.Conv2D(2048, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x = self.bn()(x, is_training)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.gelu(x)
+        x8 = x + x8
+
+        mask = ConvInverse()((x1, x2, x3, x4, x5, x6, x7, x8), is_training)
 
         return mask
 
@@ -276,7 +291,7 @@ grad_clip_value = 1.0
 learning_rate = 0.001
 batch_size = 2
 dropout = 0.5
-max_steps = 1 #1500
+max_steps = 1800
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
@@ -299,8 +314,8 @@ scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=1
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    #optax.scale_by_radam(),
-    optax.scale_by_adam(),
+    optax.scale_by_radam(),
+    #optax.scale_by_adam(),
     optax.scale_by_schedule(scheduler),
     optax.scale(-1.0)
 )
