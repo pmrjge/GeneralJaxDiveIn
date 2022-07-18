@@ -59,7 +59,7 @@ class TrainLoader:
         image = Image.open(str(path))
         image = image.resize([self.img_size, self.img_size])
         image = np.array(image).astype(float)
-        image = (image - image.min()) / (image.max() - image.min())
+        #image = (image - image.min()) / (image.max() - image.min())
         
 
         encs = train.rle[idx]
@@ -72,7 +72,7 @@ class TrainLoader:
 
 import multiprocessing
 
-batch_size = 8
+batch_size = 3
 num_cpus = min([max([1,int(multiprocessing.cpu_count() * 0.8)]), int(batch_size * 0.8)])
 
 tl = TrainLoader()
@@ -298,7 +298,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.01
+learning_rate = 0.0001
 batch_size = 2
 dropout = 0.5
 max_steps = 1000
@@ -318,13 +318,13 @@ forward_fn = hk.transform_with_state(forward_fn)
 forward_apply = forward_fn.apply
 loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=1000, decay_rate=0.99)
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=100, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    optax.scale_by_radam(),
-    #optax.scale_by_adam(),
+    #optax.scale_by_radam(),
+    optax.scale_by_adam(),
     optax.scale_by_schedule(scheduler),
     optax.scale(-1.0)
 )
