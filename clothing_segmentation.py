@@ -100,7 +100,23 @@ class ConvSimplifier(hk.Module):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
         
-        x1 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x1 = hk.Conv2D(32, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x1 = self.bn()(x1, is_training)
+        x1 = jnn.gelu(x1)
+
+        x1 = hk.Conv2D(64, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x1 = self.bn()(x1, is_training)
+        x1 = jnn.gelu(x1)
+
+        x1 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x1 = self.bn()(x1, is_training)
+        x1 = jnn.gelu(x1)
+
+        x1 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x1 = self.bn()(x1, is_training)
+        x1 = jnn.gelu(x1)
+
+        x1 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x1)
         x1 = self.bn()(x1, is_training)
         x1 = jnn.gelu(x1)
 
