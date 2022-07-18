@@ -224,12 +224,8 @@ def dice_loss(inputs, gtr, smooth=1e-6, gamma=2):
 def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
     y_pred, state = forward_fn(params, state, rng, x, is_training)
 
-    print(y_pred.shape)
-    print(y.shape)
-
     y_hot = jnn.one_hot(y, 59, dtype=jnp.float32)
     y_hot = einops.rearrange(y_hot, 'b c h t f -> b c h (t f)')
-    print(y_hot.shape)
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     return jnp.mean(optax.softmax_cross_entropy(y_pred, y_hot)) + jnp.mean(dice_loss(jnn.softmax(y_pred, axis=3), y_hot, smooth=1e-6)) + 1e-6 * l2_loss, state
 
@@ -277,10 +273,10 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.0001
+learning_rate = 0.001
 batch_size = 2
 dropout = 0.5
-max_steps = 700
+max_steps = 1 #1500
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
@@ -338,3 +334,28 @@ for i, (imgs, masks) in zip(range(max_steps), train_dataset):
 
     if (i + 1) % 2 == 0:
         print(f'At step {i} the loss is {metrics}')
+
+
+print('Evaluation loop.....................')
+fn = jax.jit(forward_apply, static_argnames=['is_training'])
+
+rng1, rng = jr.split(rng)
+state = state_multi_device
+rng = rng1
+params = params_multi_device
+
+for idx in test_indices:
+    test_img, test_mask = load_pair(idx)
+    test_img = jnp.array(test_img)
+    test_img = jnp.expand_dims(test_img, axis=0)
+    mask_pred, _ = fn(params, state, rng, test_img, is_training=False)
+    mask_pred = jnn.softmax(mask_pred)
+    mask_pred = np.array(mask_pred[0])
+    final_pred = np.argmax(mask_pred, axis=2)
+    print(final_pred.shape)
+
+    imageio.imwrite(f'./data/clothing/results/mask_{idx}.png', final_pred)
+
+    test_mask = einops.rearrange(test_mask, 'w h c -> w (h c)')
+    imageio.imwrite(f'./data/clothing/results/mask_{idx}_t.png', test_mask)
+
