@@ -1,0 +1,53 @@
+import logging
+import pickle
+from typing import Optional, Mapping, Any
+
+import haiku as hk
+import jax
+import jax.numpy as jnp
+import jax.random as jr
+import jax.nn as jnn
+import haiku.initializers as hki
+import einops
+import functools as ft
+
+import numpy as np
+import optax
+import pandas as pd
+
+import imageio
+import tifffile
+import cv2
+from PIL import Image
+
+
+def train_test_split():
+    key1 = jr.PRNGKey(1001)
+
+    indices = jnp.arange(1, 1001)
+
+    shuffled_indices = jr.permutation(key1, indices)
+
+    train_indices = shuffled_indices[:900]
+    test_indices = shuffled_indices[900:]
+
+    return train_indices, test_indices
+
+
+def load_data(idx, shape=(256, 256)):
+    index = format(idx, '04d')
+    img_path = f'./data/clothing/png_images/IMAGES/img_{index}.png'
+    mask_path = f'./data/clothing/png_masks/MASKS/seg_{index}.png'
+    
+    image = Image.open(str(img_path))
+    image = image.resize([shape[0], shape[1]])
+    image = np.array(image).astype(float)
+
+    mask = Image.open(str(mask_path))
+    mask = mask.resize([shape[0], shape[1]])
+    mask = np.array(mask).astype(float)
+
+    return image, mask
+
+    
+
