@@ -188,7 +188,7 @@ class ConvInverse(hk.Module):
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        val = hk.Conv2D(output_channels=1, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2D(output_channels=59, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
         val = self.bn()(val, is_training)
 
         return val
@@ -212,8 +212,6 @@ class SimpleUNet(hk.Module):
 
 
 def dice_loss(inputs, gtr, smooth=1e-6, gamma=2):
-    inputs = jnp.array(inputs, dtype=jnp.float32)
-    gtr = jnp.array(gtr, dtype=jnp.float32)
     inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
     gtr = einops.rearrange(gtr, 'b c h t -> b (c h t)')
     s1 = jnp.sum(gtr ** gamma, axis=1)
@@ -226,8 +224,9 @@ def dice_loss(inputs, gtr, smooth=1e-6, gamma=2):
 def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
     y_pred, state = forward_fn(params, state, rng, x, is_training)
 
+    y_hot = jnn.one_hot(y, 59, dtype=jnp.float32, axis=3)
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
-    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
+    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y_hot)) + dice_loss(jnn.sigmoid(y_pred), y_hot, smooth=1e-6) + 1e-6 * l2_loss, state
 
 
 def build_forward_fn(dropout=0.5):
@@ -235,7 +234,7 @@ def build_forward_fn(dropout=0.5):
         return SimpleUNet(dropout)(x, is_training=is_training)
 
     return forward_fn
-    
+
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
         self._net_init = net_init
@@ -273,7 +272,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.01
+learning_rate = 0.001
 batch_size = 2
 dropout = 0.5
 max_steps = 700
