@@ -22,29 +22,56 @@ from PIL import Image
 
 #train = pd.read_csv('/kaggle/input/hubmap-organ-segmentation/train.csv')
 train = pd.read_csv('./data/segmentation/train.csv')
-
+test = pd.read_csv('./data/segmentation/test.csv')
 #string_to_retrieve_data = lambda x: f"../input/hubmap-organ-segmentation/train_images/{x}.tiff"
 def string_to_retrieve_data(x):
     return f"./data/segmentation/train_images/{x}.tiff"
 
+def string_to_retrieve_test(x):
+    return f"./data/segmentation/test_images/{x}.tiff"
 
 def resize_tensor(tensor, dims=(1536, 1536)):
     return cv2.resize(tensor, [dims[0], dims[1]], interpolation=cv2.INTER_CUBIC).astype(np.uint8)
 
-def rle2mask(mask_rle, shape, dims=(1536,1536)):
-    mask = np.zeros(shape[0]*shape[1], dtype=np.uint8)
-    for m,enc in enumerate(mask_rle):
-        if isinstance(enc,float) and np.isnan(enc): continue
-        s = enc.split()
-        for i in range(len(s)//2):
-            start = int(s[2*i]) - 1
-            length = int(s[2*i+1])
-            mask[start:start+length] = 1 + m
-    mask = mask.reshape(shape).T
-    mask = np.expand_dims(mask, axis=2)
-    mask = resize_tensor(mask)
+# def rle2mask(mask_rle, shape, dims=(1536,1536)):
+#     mask = np.zeros(shape[0]*shape[1], dtype=np.uint8)
+#     for m,enc in enumerate(mask_rle):
+#         if isinstance(enc,float) and np.isnan(enc): continue
+#         s = enc.split()
+#         for i in range(len(s)//2):
+#             start = int(s[2*i]) - 1
+#             length = int(s[2*i+1])
+#             mask[start:start+length] = 1 + m
+#     mask = mask.reshape(shape).T
+#     mask = np.expand_dims(mask, axis=3)
+#     mask = resize_tensor(mask)
 
-    return mask
+#     return mask
+
+def rle2mask(mask_rle, shape, dims=(1536, 1536)):
+    s = np.asarray(mask_rle.split(), dtype=int)
+    starts = s[0::2] - 1
+    lengths = s[1::2]
+    ends = starts + lengths
+    mask = np.zeros(shape[0]*shape[1], dtype=np.uint8)
+    for lo, hi in zip(starts, ends):
+        mask[lo:hi] = 1
+    mask = mask.reshape(shape).T
+    mask = resize_tensor(mask, dims)
+    return np.expand_dims(mask, axis=2) 
+
+def mask2enc(mask, n=1):
+    pixels = mask.T.flatten()
+    encs = []
+    for i in range(1,n+1):
+        p = (pixels == i).astype(np.int32)
+        if p.sum() == 0: encs.append(np.nan)
+        else:
+            p = np.concatenate([[0], p, [0]])
+            runs = np.where(p[1:] != p[:-1])[0] + 1
+            runs[1::2] -= runs[::2]
+            encs.append(' '.join(str(x) for x in runs))
+    return encs
 
 class TrainLoader:
     def __init__(self):
@@ -68,6 +95,18 @@ class TrainLoader:
         label = rle2mask(encs, (width, height))
 
         return image, label
+
+
+def read_test_image():
+    test = pd.read_csv('./data/segmentation/test.csv')
+    paths = test["id"].apply(lambda x: string_to_retrieve_test(x)).values.tolist()
+
+    path = paths[0]
+    image = Image.open(str(path))
+    image = image.resize([1536, 1536])
+    image = np.array(image).astype(float)
+
+    return image
 
 
 import multiprocessing
@@ -239,7 +278,7 @@ class SimpleUNet(hk.Module):
 
 def dice_loss(inputs, gtr, smooth=1e-6):
     inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
-    gtr = einops.rearrange(gtr, 'b c h -> b (c h)')
+    gtr = einops.rearrange(gtr, 'b c h t -> b (c h t)')
     s1 = jnp.sum(gtr, axis=1)
     s2 = jnp.sum(inputs, axis=1)
     intersect = jnp.sum(gtr * inputs, axis=1)
@@ -259,7 +298,7 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     #return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-4 * l2_loss, state
-    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
+    return 0.5 * jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y)) + 0.5 * dice_loss(jnn.sigmoid(y_pred), y, smooth=1e-6) + 1e-6 * l2_loss, state
 
 class GradientUpdater:
     def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
@@ -298,10 +337,10 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.0001
+learning_rate = 0.01
 batch_size = 2
 dropout = 0.5
-max_steps = 1000
+max_steps = 700
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
@@ -323,15 +362,15 @@ scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=1
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    #optax.scale_by_radam(),
-    optax.scale_by_adam(),
+    optax.scale_by_radam(),
+    #optax.scale_by_adam(),
     optax.scale_by_schedule(scheduler),
     optax.scale(-1.0)
 )
 
 updater = GradientUpdater(forward_fn.init, loss_fn, optimizer)
 
-logging.info('Initializing parameters........................')
+print('Initializing parameters........................')
 
 rng1, rng = jr.split(rng)
 x, y = next(train_dataset)
@@ -348,13 +387,42 @@ state_multi_device = state
 batch_update = jax.pmap(updater.update, axis_name='j', in_axes=(0, None, None, None, None, 0, 0),
                         out_axes=(0, None, None, None, None, 0))
 
-logging.info('Starting train loop ++++++++...')
+print('Starting train loop ++++++++...')
 
 for i, (imgs, masks) in zip(range(max_steps), train_dataset):
     if (i + 1) % 2 == 0:
-        logging.info(f'Step {i} computing forward-backward pass')
+        print(f'Step {i} computing forward-backward pass')
     num_steps_replicated, rng_replicated, params_multi_device, state_multi_device, opt_state_multi_device, metrics = batch_update(
         num_steps_replicated, rng_replicated, params_multi_device, state_multi_device, opt_state_multi_device, imgs, masks)
 
     if (i + 1) % 2 == 0:
-        logging.info(f'At step {i} the loss is {metrics}')
+        print(f'At step {i} the loss is {metrics}')
+
+print('Starting evaluation ++++++++...')
+fn = jax.jit(forward_apply, static_argnames=['is_training'])
+
+test_img = read_test_image()
+test_img = jnp.expand_dims(jnp.array(test_img), axis=0)
+
+rng1, rng = jr.split(rng)
+state = state_multi_device
+rng = rng1
+params = params_multi_device
+
+mask_pred, _ = fn(params, state, rng, test_img, is_training=False)
+mask_pred = jnn.sigmoid(mask_pred)
+mask_pred = np.array(mask_pred[0, :, :])
+
+print(mask_pred.shape)
+
+mask = np.zeros((1536, 1536), dtype=np.int32)
+for i in range(1536):
+    for j in range(1536):
+        mask[i, j] = mask_pred[i,j] > 0.5
+
+rle = mask2enc(mask)
+names = 10078
+preds = rle
+
+df = pd.DataFrame({'id':names,'rle':preds})
+df.to_csv('./data/submission.csv',index=False)
