@@ -224,9 +224,14 @@ def dice_loss(inputs, gtr, smooth=1e-6, gamma=2):
 def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
     y_pred, state = forward_fn(params, state, rng, x, is_training)
 
-    y_hot = jnn.one_hot(y, 59, dtype=jnp.float32, axis=3)
+    print(y_pred.shape)
+    print(y.shape)
+
+    y_hot = jnn.one_hot(y, 59, dtype=jnp.float32)
+    y_hot = einops.rearrange(y_hot, 'b c h t f -> b c h (t f)')
+    print(y_hot.shape)
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
-    return jnp.mean(optax.sigmoid_binary_cross_entropy(y_pred, y_hot)) + dice_loss(jnn.sigmoid(y_pred), y_hot, smooth=1e-6) + 1e-6 * l2_loss, state
+    return jnp.mean(optax.softmax_cross_entropy(y_pred, y_hot)) + jnp.mean(dice_loss(jnn.softmax(y_pred, axis=3), y_hot, smooth=1e-6)) + 1e-6 * l2_loss, state
 
 
 def build_forward_fn(dropout=0.5):
@@ -272,14 +277,15 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.001
+learning_rate = 0.0001
 batch_size = 2
 dropout = 0.5
 max_steps = 700
 num_devices = jax.local_device_count()
 rng = jr.PRNGKey(111)
 
-print("Number of training examples :::::: ", tl.size())
+print("Number of training examples :::::: ", train_indices.shape[0])
+print("Number of testing examples :::::: ", test_indices.shape[0])
 
 rng, rng_key = jr.split(rng)
 
@@ -297,8 +303,8 @@ scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=1
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    optax.scale_by_radam(),
-    #optax.scale_by_adam(),
+    #optax.scale_by_radam(),
+    optax.scale_by_adam(),
     optax.scale_by_schedule(scheduler),
     optax.scale(-1.0)
 )
