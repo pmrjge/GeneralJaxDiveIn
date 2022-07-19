@@ -148,9 +148,9 @@ class ConvSimplifier(hk.Module):
         x5 = self.bn()(x5, is_training)
         x5 = jnn.gelu(x5)
 
-        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x5)
-        x5 = self.bn()(x5, is_training)
-        x5 = jnn.gelu(x5)
+        # x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        # x5 = self.bn()(x5, is_training)
+        # x5 = jnn.gelu(x5)
 
         x5 = hk.Conv2D(512, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x5)
         x5 = self.bn()(x5, is_training)
@@ -160,19 +160,19 @@ class ConvSimplifier(hk.Module):
         x6 = self.bn()(x6, is_training)
         x6 = jnn.gelu(x6)
 
-        x6 = hk.Conv2D(1024, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x6)
-        x6 = self.bn()(x6, is_training)
-        x6 = jnn.gelu(x6)
+        # x6 = hk.Conv2D(1024, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        # x6 = self.bn()(x6, is_training)
+        # x6 = jnn.gelu(x6)
 
         x6 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
         x6 = self.bn()(x6, is_training)
         x6 = jnn.gelu(x6)
 
-        x7 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x7)
+        x7 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
         x7 = self.bn()(x7, is_training)
         x7 = jnn.gelu(x7)
 
-        x8 = hk.Conv2D(4096, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        x8 = hk.Conv2D(4096, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x7)
         x8 = self.bn()(x8, is_training)
         x8 = jnn.gelu(x8)
 
