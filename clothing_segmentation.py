@@ -294,7 +294,7 @@ def lm_loss_fn(forward_fn, params, state, rng, x, y, is_training: bool = True):
     y_hot = jnn.one_hot(y, 59, dtype=jnp.float32)
     y_hot = einops.rearrange(y_hot, 'b c h t f -> b c h (t f)')
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
-    return jnp.mean(optax.softmax_cross_entropy(y_pred, y_hot)) + jnp.mean(dice_loss(jnn.softmax(y_pred, axis=3), y_hot, smooth=1e-6)) + 1e-6 * l2_loss, state
+    return jnp.mean(optax.softmax_cross_entropy(einops.rearrange(y_pred, 'b h w c -> b (h w) c'), einops.rearrange(y_hot, 'b h w c -> b (h w) c'))) + jnp.mean(dice_loss(jnn.softmax(y_pred, axis=3), y_hot, smooth=1e-6)) + 1e-6 * l2_loss, state
 
 
 def build_forward_fn(dropout=0.5):
@@ -340,7 +340,7 @@ def replicate_tree(t, num_devices):
 
 logging.getLogger().setLevel(logging.INFO)
 grad_clip_value = 1.0
-learning_rate = 0.001
+learning_rate = 0.0003
 batch_size = 2
 dropout = 0.5
 max_steps = 1800
