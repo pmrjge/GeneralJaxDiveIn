@@ -99,8 +99,8 @@ class ConvSimplifier(hk.Module):
     def __call__(self, x, is_training):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
-        
-        x1 = hk.Conv2D(32, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+
+        x1 = hk.Conv2D(64, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
         x1 = self.bn()(x1, is_training)
         x1 = jnn.gelu(x1)
 
@@ -108,47 +108,83 @@ class ConvSimplifier(hk.Module):
         x1 = self.bn()(x1, is_training)
         x1 = jnn.gelu(x1)
 
-        x1 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x1 = hk.Conv2D(64, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x1)
         x1 = self.bn()(x1, is_training)
         x1 = jnn.gelu(x1)
 
-        x1 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
-        x1 = self.bn()(x1, is_training)
-        x1 = jnn.gelu(x1)
-
-        x1 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x1)
-        x1 = self.bn()(x1, is_training)
-        x1 = jnn.gelu(x1)
-
-        x2 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x1)
+        x2 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x1)
         x2 = self.bn()(x2, is_training)
         x2 = jnn.gelu(x2)
 
-        x3 = hk.Conv2D(256, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x2)
+        x2 = hk.Conv2D(128, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x2)
+        x2 = self.bn()(x2, is_training)
+        x2 = jnn.gelu(x2)
+
+        x2 = hk.Conv2D(128, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x2)
+        x2 = self.bn()(x2, is_training)
+        x2 = jnn.gelu(x2)
+
+        x3 = hk.Conv2D(256, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x2)
         x3 = self.bn()(x3, is_training)
         x3 = jnn.gelu(x3)
 
-        x4 = hk.Conv2D(256, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x3)
-        x4 = self.bn()(x4, is_training)
-        x4 = jnn.gelu(x4)
+        x3 = hk.Conv2D(256, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x3)
+        x3 = self.bn()(x3, is_training)
+        x3 = jnn.gelu(x3)
 
-        x5 = hk.Conv2D(512, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x4)
+        x3 = hk.Conv2D(256, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x3)
+        x3 = self.bn()(x3, is_training)
+        x3 = jnn.gelu(x3)
+
+        x3 = hk.Conv2D(256, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x3)
+        x3 = self.bn()(x3, is_training)
+        x3 = jnn.gelu(x3)
+
+        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x4)
         x5 = self.bn()(x5, is_training)
         x5 = jnn.gelu(x5)
 
-        x6 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        x5 = self.bn()(x5, is_training)
+        x5 = jnn.gelu(x5)
+
+        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        x5 = self.bn()(x5, is_training)
+        x5 = jnn.gelu(x5)
+
+        x5 = hk.Conv2D(512, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x5)
+        x5 = self.bn()(x5, is_training)
+        x5 = jnn.gelu(x5)
+
+        x6 = hk.Conv2D(1024, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x5)
         x6 = self.bn()(x6, is_training)
         x6 = jnn.gelu(x6)
 
-        x7 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        x6 = hk.Conv2D(1024, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        x6 = self.bn()(x6, is_training)
+        x6 = jnn.gelu(x6)
+
+        x6 = hk.Conv2D(1024, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x6)
+        x6 = self.bn()(x6, is_training)
+        x6 = jnn.gelu(x6)
+
+        x7 = hk.Conv2D(2048, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x6)
         x7 = self.bn()(x7, is_training)
         x7 = jnn.gelu(x7)
 
-        x8 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x7)
+        x7 = hk.Conv2D(2048, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x7)
+        x7 = self.bn()(x7, is_training)
+        x7 = jnn.gelu(x7)
+
+        x8 = hk.Conv2D(4096, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x7)
         x8 = self.bn()(x8, is_training)
         x8 = jnn.gelu(x8)
 
-        return x1, x2, x3, x4, x5, x6, x7, x8
+        x8 = hk.Conv2D(4096, 3, 2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        x8 = self.bn()(x8, is_training)
+        x8 = jnn.gelu(x8)
+
+        return x1, x2, x3, x5, x6, x7, x8
 
 class ConvInverse(hk.Module):
     def __init__(self):
@@ -159,15 +195,15 @@ class ConvInverse(hk.Module):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
 
-        x1, x2, x3, x4, x5, x6, x7, x8 = x
+        x1, x2, x3, x5, x6, x7, x8 = x
 
-        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        val = hk.Conv2DTranspose(4096, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
         zcat = jnp.concatenate([val, x7], axis=3)
         val = hk.Conv2D(output_channels=2048, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(1024, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2DTranspose(2048, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x6], axis=3)
         val = hk.Conv2D(output_channels=1024, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
@@ -180,14 +216,8 @@ class ConvInverse(hk.Module):
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(512, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        zcat = jnp.concatenate([val, x4], axis=3)
-        val = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
-        val = self.bn()(val, is_training)
-        val = jnn.gelu(val)
-
-        val = hk.Conv2DTranspose(256, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x3], axis=3)
-        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=512, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
@@ -199,13 +229,12 @@ class ConvInverse(hk.Module):
 
         val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x1], axis=3)
-        val = hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
         val = jnn.gelu(val)
 
-        val = hk.Conv2DTranspose(128, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        val = hk.Conv2D(output_channels=59, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        val = self.bn()(val, is_training)
+        val = hk.Conv2DTranspose(64, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
+        val = hk.Conv2D(output_channels=59, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
 
         return val
 
@@ -223,26 +252,26 @@ class SimpleUNet(hk.Module):
 
         x = ConvSimplifier()(x, is_training)
 
-        x1, x2, x3, x4, x5, x6, x7, x8 = x
+        x1, x2, x3, x5, x6, x7, x8 = x
 
-        x = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        x = hk.Conv2D(8192, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x8)
         x = self.bn()(x, is_training)
         x = jnn.gelu(x)
         x = hk.Conv2D(8192, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
         x = self.bn()(x, is_training)
         x = jnn.gelu(x)
-        x = hk.Conv2D(2048, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
         x = self.bn()(x, is_training)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.gelu(x)
         x8 = x + x8
 
-        mask = ConvInverse()((x1, x2, x3, x4, x5, x6, x7, x8), is_training)
+        mask = ConvInverse()((x1, x2, x3, x5, x6, x7, x8), is_training)
 
         return mask
 
 
-def dice_loss(inputs, gtr, smooth=1e-6, gamma=2):
+def dice_loss(inputs, gtr, smooth=1e-6, gamma=1):
     inputs = einops.rearrange(inputs, 'b c h t -> b (c h t)')
     gtr = einops.rearrange(gtr, 'b c h t -> b (c h t)')
     s1 = jnp.sum(gtr ** gamma, axis=1)
