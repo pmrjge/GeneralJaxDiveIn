@@ -195,9 +195,15 @@ class ConvInverse(hk.Module):
         w_init = hki.VarianceScaling(1.0)
         b_init = hki.Constant(1e-6)
 
-        x1, x2, x3, x5, x6, x7, x8 = x
+        x1, x2, x3, x5, x6, x7, x8, xl = x
 
-        val = hk.Conv2DTranspose(4096, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(x8)
+        val = hk.Conv2DTranspose(8192, 3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(xl)
+        zcat = jnp.concatenate([val, x8], axis=3)
+        val = hk.Conv2D(output_channels=4096, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = self.bn()(val, is_training)
+        val = jnn.gelu(val)
+
+        val = hk.Conv2DTranspose(4096, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
         zcat = jnp.concatenate([val, x7], axis=3)
         val = hk.Conv2D(output_channels=2048, kernel_shape=1, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
         val = self.bn()(val, is_training)
@@ -234,7 +240,9 @@ class ConvInverse(hk.Module):
         val = jnn.gelu(val)
 
         val = hk.Conv2DTranspose(64, 3, stride=2, padding="SAME", w_init=w_init, b_init=b_init)(val)
-        val = hk.Conv2D(output_channels=59, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(zcat)
+        val = self.bn()(val, is_training)
+        val = jnn.gelu(val)
+        val = hk.Conv2D(output_channels=59, kernel_shape=3, stride=1, padding="SAME", w_init=w_init, b_init=b_init)(val)
 
         return val
 
@@ -260,13 +268,12 @@ class SimpleUNet(hk.Module):
         x = hk.Conv2D(8192, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
         x = self.bn()(x, is_training)
         x = jnn.gelu(x)
-        x = hk.Conv2D(4096, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
+        x = hk.Conv2D(8192, 1, 1, padding="SAME", w_init=w_init, b_init=b_init)(x)
         x = self.bn()(x, is_training)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.gelu(x)
-        x8 = x + x8
 
-        mask = ConvInverse()((x1, x2, x3, x5, x6, x7, x8), is_training)
+        mask = ConvInverse()((x1, x2, x3, x5, x6, x7, x8, x), is_training)
 
         return mask
 
