@@ -140,7 +140,7 @@ class ConvSimplifier(hk.Module):
         x3 = self.bn()(x3, is_training)
         x3 = jnn.gelu(x3)
 
-        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x4)
+        x5 = hk.Conv2D(512, 3, 1, padding="SAME", w_init=w_init, b_init=b_init)(x3)
         x5 = self.bn()(x5, is_training)
         x5 = jnn.gelu(x5)
 
