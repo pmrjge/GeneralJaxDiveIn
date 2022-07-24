@@ -4,6 +4,7 @@ import pickle
 from typing import Optional, Mapping, Any
 
 import numpy as np
+import optax
 import pandas as pd
 import datetime as dt
 from itertools import product
@@ -14,6 +15,14 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import OrdinalEncoder
 from xgboost import XGBRegressor
+
+import haiku as hk
+import jax.nn as jnn
+import jax.numpy as jnp
+import jax
+import jax.random as jr
+
+import functools as ft
 
 def load_boost():
     df_train = pd.read_csv('./data/regression/train.csv')
@@ -175,7 +184,69 @@ def load_boost():
 
     y_train_log = np.log10(y_train)
 
-    return X_train_scaled, y_train_log, X_test_scaled, df_test
+    return jnp.array(X_train_scaled), jnp.array(y_train_log), jnp.array(X_test_scaled), df_test
+
+
+class Regressor(hk.Module):
+    def __init__(self):
+        super(Regressor, self).__init__()
+
+    def __call__(self, x, is_training):
+        dropout = 0.5 if is_training else 0.0
+        x = hk.Linear(16)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(64)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(128)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        return hk.Linear(1)(x)
+
+
+def build_forward_fn():
+    def forward_fn(x: jnp.ndarray, is_training: bool = True) -> jnp.ndarray:
+        return Regressor()(x, is_training=is_training)
+
+    return forward_fn
+
+@ft.partial(jax.jit, static_argnames=('forward_fn',))
+def lm_loss_fn(forward_fn, params, rng, x, y):
+    y_pred = forward_fn(params, rng, x, True)
+
+    l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
+
+    return jnp.sqrt(jnp.mean(jnp.square(y_pred - y))) + 1e-6 * l2_loss
+
+
+class GradientUpdater:
+    def __init__(self, net_init, loss_fn, optimizer: optax.GradientTransformation):
+        self._net_init = net_init
+        self._loss_fn = loss_fn
+        self._opt = optimizer
+
+    def init(self, master_rng, x):
+        out_rng, init_rng = jax.random.split(master_rng)
+        params = self._net_init(init_rng, x)
+        opt_state = self._opt.init(params)
+        return jnp.array(0), out_rng, params, opt_state
+
+    def update(self, num_steps, rng, params, opt_state, x: jnp.ndarray, y: jnp.ndarray):
+        rng, new_rng = jax.random.split(rng)
+
+        (loss, state), grads = jax.value_and_grad(self._loss_fn, has_aux=True)(params, rng, x, y)
+
+        grads = jax.lax.pmean(grads, axis_name='j')
+
+        updates, opt_state = self._opt.update(grads, opt_state, params)
+
+        params = optax.apply_updates(params, updates)
+
+        metrics = {
+            'step': num_steps,
+            'loss': loss,
+        }
+
+        return num_steps + 1, new_rng, params, opt_state, metrics
 
 def main():
     x, y, x_test, test_ds = load_boost()
@@ -184,23 +255,40 @@ def main():
     print("Examples :::: ", y.shape)
     print("Testing Examples :::: ", x_test.shape)
 
-    logging.info(f"Fitting boosting algorithm.................")
+    logging.info(f"Fitting algorithm.................")
+    rng = jr.PRNGKey(111)
+    rng, rng_key = jr.split(rng)
+    forward_fn = build_forward_fn()
+    forward_fn = hk.transform(forward_fn)
 
-    model = XGBRegressor(tree_method='gpu_hist', n_estimators=4096, max_depth=6, subsample=0.9, colsample_bytree=0.85)
-    #cv = RepeatedKFold(n_splits=4, n_repeats=2, random_state=1)
-    #print(sklearn.metrics.get_scorer_names())
+    forward_apply = forward_fn.apply
+    loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-    #scores = cross_val_score(model, x, y, scoring='neg_root_mean_squared_error', cv=cv, n_jobs=-1)
+    scheduler = optax.exponential_decay(init_value=0.001, transition_steps=400, decay_rate=0.99)
 
-    #scores = np.absolute(scores)
+    optimizer = optax.chain(
+        optax.adaptive_grad_clip(1.0),
+        # optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
+        # optax.scale_by_radam(),
+        optax.scale_by_adam(),
+        optax.scale_by_schedule(scheduler),
+        optax.scale(-1.0)
+    )
 
-    #logging.info('Fit results.........................')
-    #print('Mean Sqrt Square Error %.3f (%.3f)' % (scores.mean(), scores.std()))
+    updater = GradientUpdater(forward_fn.init, loss_fn, optimizer)
 
-    model.fit(x, y)
+    num_steps, rng2, params, opt_state = updater.init(rng_key, x[0, :])
+    rng1, rng = jr.split(rng)
+
+    for i in range(20):
+        num_steps, rng1, params, opt_state, metrics = updater.update(num_steps, rng1, params, opt_state, x, y)
+        print(f"Loss metrics at epoch {i} is {metrics}")
 
     logging.info(f"Computing predictions...................")
-    result = model.predict(x_test)
+    forward_apply = jax.jit(forward_fn.apply, static_argnames=['is_training'])
+    rng = jr.split(rng, 1)
+    result = forward_apply(params, rng, x_test, is_training=False)
+    result = np.array(result).clip(0, 500000)
 
     output = pd.DataFrame({'Id': test_ds['Id'], 'SalePrice': result})
     output.to_csv('./data/submission.csv', index=False)
