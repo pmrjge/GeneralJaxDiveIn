@@ -193,7 +193,7 @@ class Regressor(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.5 if is_training else 0.0
-        x = hk.Linear(16)(x)
+        x = hk.Linear(32)(x)
         x = jnn.relu(x)
         x = hk.Linear(64)(x)
         x = jnn.relu(x)
@@ -209,9 +209,10 @@ def build_forward_fn():
 
     return forward_fn
 
+
 @ft.partial(jax.jit, static_argnames=('forward_fn',))
 def lm_loss_fn(forward_fn, params, rng, x, y):
-    y_pred = forward_fn(params, rng, x, True)
+    y_pred = forward_fn(params, rng, x, is_training=True)
 
     l2_loss = 0.1 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
 
@@ -233,9 +234,7 @@ class GradientUpdater:
     def update(self, num_steps, rng, params, opt_state, x: jnp.ndarray, y: jnp.ndarray):
         rng, new_rng = jax.random.split(rng)
 
-        (loss, state), grads = jax.value_and_grad(self._loss_fn, has_aux=True)(params, rng, x, y)
-
-        grads = jax.lax.pmean(grads, axis_name='j')
+        loss, grads = jax.value_and_grad(self._loss_fn)(params, rng, x, y)
 
         updates, opt_state = self._opt.update(grads, opt_state, params)
 
@@ -264,12 +263,10 @@ def main():
     forward_apply = forward_fn.apply
     loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-    scheduler = optax.exponential_decay(init_value=0.001, transition_steps=400, decay_rate=0.99)
+    scheduler = optax.exponential_decay(init_value=0.0006, transition_steps=100, decay_rate=0.99)
 
     optimizer = optax.chain(
         optax.adaptive_grad_clip(1.0),
-        # optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-        # optax.scale_by_radam(),
         optax.scale_by_adam(),
         optax.scale_by_schedule(scheduler),
         optax.scale(-1.0)
@@ -280,15 +277,14 @@ def main():
     num_steps, rng2, params, opt_state = updater.init(rng_key, x[0, :])
     rng1, rng = jr.split(rng)
 
-    for i in range(20):
+    for i in range(200):
         num_steps, rng1, params, opt_state, metrics = updater.update(num_steps, rng1, params, opt_state, x, y)
         print(f"Loss metrics at epoch {i} is {metrics}")
 
     logging.info(f"Computing predictions...................")
-    forward_apply = jax.jit(forward_fn.apply, static_argnames=['is_training'])
-    rng = jr.split(rng, 1)
+    forward_apply = jax.jit(forward_apply, static_argnames=['is_training'])
     result = forward_apply(params, rng, x_test, is_training=False)
-    result = np.array(result).clip(0, 500000)
+    result = np.power(10, result).clip(0, 500000).ravel()
 
     output = pd.DataFrame({'Id': test_ds['Id'], 'SalePrice': result})
     output.to_csv('./data/submission.csv', index=False)
