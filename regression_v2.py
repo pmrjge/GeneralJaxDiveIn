@@ -16,6 +16,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.preprocessing import OrdinalEncoder
 from xgboost import XGBRegressor
 
+import haiku.initializers as hki
+
 import haiku as hk
 import jax.nn as jnn
 import jax.numpy as jnp
@@ -138,55 +140,15 @@ def load_boost():
     y_train = df_train["SalePrice"]
 
     te = MEstimateEncoder(cols=df_train[cat_var.index.append(pd.Index(["MoSold"]))]) # Add MoSold variable to the encoder
-    X_train = te.fit_transform(X_train, y_train)
+    x_train = te.fit_transform(X_train, y_train)
     df_test = te.transform(df_test)
 
-    df_train = pd.concat([X_train, y_train], axis=1)
-
-    df_train_corr = df_train[num_var].corr().abs().unstack().sort_values(kind="quicksort", ascending=False).reset_index()
-    df_train_corr.rename(columns={"level_0": "Feature 1", "level_1": "Feature 2", 0: 'Correlation Coefficient'}, inplace=True)
-    df_train_corr.drop(df_train_corr.iloc[1::2].index, inplace=True)
-    df_train_corr = df_train_corr.drop(df_train_corr[df_train_corr['Correlation Coefficient'] == 1.0].index)
-
-    high_corr = df_train_corr['Correlation Coefficient'] > 0.5
-    df_train_corr[high_corr].reset_index(drop=True)
-    df_train_corr[high_corr].loc[(df_train_corr["Feature 1"]=="SalePrice") | (df_train_corr["Feature 2"]=="SalePrice")].reset_index(drop=True)
-    for df in [df_train, df_test]:
-        df["GarAreaPerCar"] = (df["GarageArea"] / df["GarageCars"]).fillna(0)
-        df["GrLivAreaPerRoom"] = df["GrLivArea"] / df["TotRmsAbvGrd"]
-        df["TotalHouseSF"] = df["TotalBsmtSF"] + df["1stFlrSF"] + df["2ndFlrSF"]
-        df["TotalFullBath"] = df["FullBath"] + df["BsmtFullBath"]
-        df["TotalHalfBath"] = df["HalfBath"] + df["BsmtHalfBath"]
-        df["InitHouseAge"] = df["YrSold"] - df["YearBuilt"]
-        df["RemodHouseAge"] = df["InitHouseAge"] - (df["YrSold"] - df["YearRemodAdd"])
-        df["IsRemod"] = (df["YearRemodAdd"] - df["YearBuilt"]).apply(lambda x: 1 if x > 0 else 0)
-        df["GarageAge"] = (df["YrSold"] - df["GarageYrBlt"]).apply(lambda x: 0 if x > 2000 else x)
-        df["IsGarage"] = df["GarageYrBlt"].apply(lambda x: 1 if x > 0 else 0)
-        df['TotalPorchSF'] = df['OpenPorchSF'] + df['EnclosedPorch'] + df['3SsnPorch'] + df['ScreenPorch']
-        df["AvgQualCond"] = (df["OverallQual"] + df["OverallCond"]) / 2
-
-    for df in [df_train, df_test]:
-        df.drop([
-            "GarageArea", "GarageCars", "GrLivArea", 
-            "TotRmsAbvGrd", "TotalBsmtSF", "1stFlrSF", 
-            "2ndFlrSF", "FullBath", "BsmtFullBath", "HalfBath", 
-            "BsmtHalfBath", "YrSold", "YearBuilt", "YearRemodAdd",
-            "GarageYrBlt", "OpenPorchSF", "EnclosedPorch", "3SsnPorch",
-            "ScreenPorch", "OverallQual", "OverallCond"
-        ], axis=1, inplace=True)
-
-    # X_train = df_train.drop(["Id", "SalePrice"], axis=1)
-    # y_train = df_train.SalePrice
-
+    x_train = x_train.drop("Id", axis=1)
     x_test = df_test.drop("Id", axis=1)
-
-    scaler = StandardScaler()
-    x_train_scaled = scaler.fit_transform(X_train)
-    x_test_scaled = scaler.transform(x_test)
 
     y_train_log = np.log10(y_train)
 
-    return jnp.array(x_train_scaled), jnp.array(y_train_log), jnp.array(x_test_scaled), df_test
+    return jnp.array(x_train), jnp.array(y_train_log), jnp.array(x_test), df_test
 
 
 class Regressor0(hk.Module):
@@ -282,11 +244,11 @@ class SuperRegressor(hk.Module):
         y3 = Regressor3()(x, is_training)
         y4 = Regressor4()(x, is_training)
 
-        p0 = jnn.sigmoid(hk.get_parameter('r0w', shape=(1,)))
-        p1 = jnn.sigmoid(hk.get_parameter('r1w', shape=(1,)))
-        p2 = jnn.sigmoid(hk.get_parameter('r2w', shape=(1,)))
-        p3 = jnn.sigmoid(hk.get_parameter('r3w', shape=(1,)))
-        p4 = jnn.sigmoid(hk.get_parameter('r4w', shape=(1,)))
+        p0 = jnp.abs(hk.get_parameter('r0w', shape=(1,), init=hki.Constant(0.22)))
+        p1 = jnp.abs(hk.get_parameter('r1w', shape=(1,), init=hki.Constant(0.18)))
+        p2 = jnp.abs(hk.get_parameter('r2w', shape=(1,), init=hki.Constant(0.19)))
+        p3 = jnp.abs(hk.get_parameter('r3w', shape=(1,), init=hki.Constant(0.21)))
+        p4 = jnp.abs(hk.get_parameter('r4w', shape=(1,), init=hki.Constant(0.2)))
 
         w_sum = p0 + p1 + p2 + p3 + p4
 
@@ -339,6 +301,8 @@ class GradientUpdater:
 
 def main():
     x, y, x_test, test_ds = load_boost()
+    print("SHAPE:::::::::::::::::: ", x.shape)
+    print("TEST SHAPE :::::::::::::::\n\n", x_test.shape)
 
     print("Examples :::: ", x.shape)
     print("Examples :::: ", y.shape)
@@ -353,7 +317,7 @@ def main():
     forward_apply = forward_fn.apply
     loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-    scheduler = optax.exponential_decay(init_value=0.001, transition_steps=100, decay_rate=0.99)
+    scheduler = optax.exponential_decay(init_value=0.04, transition_steps=100, decay_rate=0.99)
 
     optimizer = optax.chain(
         optax.adaptive_grad_clip(1.0),
@@ -367,7 +331,7 @@ def main():
     num_steps, rng2, params, opt_state = updater.init(rng_key, x[0, :])
     rng1, rng = jr.split(rng)
 
-    for i in range(500):
+    for i in range(400):
         num_steps, rng1, params, opt_state, metrics = updater.update(num_steps, rng1, params, opt_state, x, y)
         print(f"Loss metrics at epoch {i} is {metrics}")
 
