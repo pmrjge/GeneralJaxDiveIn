@@ -33,6 +33,8 @@ def load_boost():
     cat_mode_var = ["Electrical", "Functional", "KitchenQual", "Exterior1st", "Exterior2nd", "MSZoning", "SaleType", "MasVnrType"]
     cat_mode = {var: df_train[var].mode()[0] for var in cat_mode_var}
 
+    print(df_train.head(10))
+
     for df in [df_train, df_test]:
         # Fill with None (because null means no building/object)
         df[cat_none_var] = df[cat_none_var].fillna("None")
@@ -173,39 +175,127 @@ def load_boost():
             "ScreenPorch", "OverallQual", "OverallCond"
         ], axis=1, inplace=True)
 
-    X_train = df_train.drop(["Id", "SalePrice"], axis=1)
-    y_train = df_train.SalePrice
+    # X_train = df_train.drop(["Id", "SalePrice"], axis=1)
+    # y_train = df_train.SalePrice
 
-    X_test = df_test.drop("Id", axis=1)
+    x_test = df_test.drop("Id", axis=1)
 
     scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
+    x_train_scaled = scaler.fit_transform(X_train)
+    x_test_scaled = scaler.transform(x_test)
 
     y_train_log = np.log10(y_train)
 
-    return jnp.array(X_train_scaled), jnp.array(y_train_log), jnp.array(X_test_scaled), df_test
+    return jnp.array(x_train_scaled), jnp.array(y_train_log), jnp.array(x_test_scaled), df_test
 
 
-class Regressor(hk.Module):
+class Regressor0(hk.Module):
     def __init__(self):
-        super(Regressor, self).__init__()
+        super(Regressor0, self).__init__()
 
     def __call__(self, x, is_training):
         dropout = 0.5 if is_training else 0.0
+        x = hk.Linear(16)(x)
+        x = jnn.relu(x)
         x = hk.Linear(32)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
         x = hk.Linear(64)(x)
-        x = jnn.relu(x)
-        x = hk.Linear(128)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
         return hk.Linear(1)(x)
 
 
+class Regressor1(hk.Module):
+    def __init__(self):
+        super(Regressor1, self).__init__()
+
+    def __call__(self, x, is_training):
+        dropout = 0.4 if is_training else 0.0
+        x = hk.Linear(32)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(64)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        return hk.Linear(1)(x)
+
+
+class Regressor2(hk.Module):
+    def __init__(self):
+        super(Regressor2, self).__init__()
+
+    def __call__(self, x, is_training):
+        dropout = 0.3 if is_training else 0.0
+        x = hk.Linear(16)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(32)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        return hk.Linear(1)(x)
+
+
+class Regressor3(hk.Module):
+    def __init__(self):
+        super(Regressor3, self).__init__()
+
+    def __call__(self, x, is_training):
+        dropout = 0.5 if is_training else 0.0
+        x = hk.Linear(32)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(32)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        x = hk.Linear(32)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        return hk.Linear(1)(x)
+
+
+class Regressor4(hk.Module):
+    def __init__(self):
+        super(Regressor4, self).__init__()
+
+    def __call__(self, x, is_training):
+        dropout = 0.7 if is_training else 0.0
+        x = hk.Linear(64)(x)
+        x = jnn.relu(x)
+        x = hk.Linear(64)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        x = hk.Linear(64)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        x = hk.Linear(64)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = jnn.relu(x)
+        return hk.Linear(1)(x)
+
+
+class SuperRegressor(hk.Module):
+    def __init__(self):
+        super(SuperRegressor, self).__init__()
+
+    def __call__(self, x, is_training):
+        y0 = Regressor0()(x, is_training)
+        y1 = Regressor1()(x, is_training)
+        y2 = Regressor2()(x, is_training)
+        y3 = Regressor3()(x, is_training)
+        y4 = Regressor4()(x, is_training)
+
+        p0 = jnn.sigmoid(hk.get_parameter('r0w', shape=(1,)))
+        p1 = jnn.sigmoid(hk.get_parameter('r1w', shape=(1,)))
+        p2 = jnn.sigmoid(hk.get_parameter('r2w', shape=(1,)))
+        p3 = jnn.sigmoid(hk.get_parameter('r3w', shape=(1,)))
+        p4 = jnn.sigmoid(hk.get_parameter('r4w', shape=(1,)))
+
+        w_sum = p0 + p1 + p2 + p3 + p4
+
+        return (p0 * y0 + p1 * y1 + p2 * y2 + p3 * y3 + p4 * y4) / w_sum
+
+
 def build_forward_fn():
     def forward_fn(x: jnp.ndarray, is_training: bool = True) -> jnp.ndarray:
-        return Regressor()(x, is_training=is_training)
+        return SuperRegressor()(x, is_training)
 
     return forward_fn
 
@@ -263,7 +353,7 @@ def main():
     forward_apply = forward_fn.apply
     loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-    scheduler = optax.exponential_decay(init_value=0.0006, transition_steps=100, decay_rate=0.99)
+    scheduler = optax.exponential_decay(init_value=0.001, transition_steps=100, decay_rate=0.99)
 
     optimizer = optax.chain(
         optax.adaptive_grad_clip(1.0),
@@ -277,14 +367,14 @@ def main():
     num_steps, rng2, params, opt_state = updater.init(rng_key, x[0, :])
     rng1, rng = jr.split(rng)
 
-    for i in range(200):
+    for i in range(500):
         num_steps, rng1, params, opt_state, metrics = updater.update(num_steps, rng1, params, opt_state, x, y)
         print(f"Loss metrics at epoch {i} is {metrics}")
 
     logging.info(f"Computing predictions...................")
     forward_apply = jax.jit(forward_apply, static_argnames=['is_training'])
     result = forward_apply(params, rng, x_test, is_training=False)
-    result = np.power(10, result).clip(0, 500000).ravel()
+    result = np.power(10, result).clip(0, 600000).ravel()
 
     output = pd.DataFrame({'Id': test_ds['Id'], 'SalePrice': result})
     output.to_csv('./data/submission.csv', index=False)
