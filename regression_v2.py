@@ -146,6 +146,10 @@ def load_boost():
     x_train = x_train.drop("Id", axis=1)
     x_test = df_test.drop("Id", axis=1)
 
+    sc = StandardScaler()
+    x_train = sc.fit_transform(x_train)
+    x_test = sc.transform(x_test)
+
     y_train_log = np.log10(y_train)
 
     return jnp.array(x_train), jnp.array(y_train_log), jnp.array(x_test), df_test
@@ -157,15 +161,16 @@ class Regressor0(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.5 if is_training else 0.0
-        x = hk.Linear(16)(x)
+        i0 = hki.VarianceScaling(1.0)
+        x = hk.Linear(16, w_init=i0)(x)
         x = jnn.relu(x)
-        x = hk.Linear(32)(x)
+        x = hk.Linear(32, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        x = hk.Linear(64)(x)
+        x = hk.Linear(64, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        return hk.Linear(1)(x)
+        return hk.Linear(1, w_init=i0)(x)
 
 
 class Regressor1(hk.Module):
@@ -174,12 +179,13 @@ class Regressor1(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.4 if is_training else 0.0
-        x = hk.Linear(32)(x)
+        i0 = hki.VarianceScaling(1.0)
+        x = hk.Linear(32, w_init=i0)(x)
         x = jnn.relu(x)
-        x = hk.Linear(64)(x)
+        x = hk.Linear(64, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        return hk.Linear(1)(x)
+        return hk.Linear(1, w_init=i0)(x)
 
 
 class Regressor2(hk.Module):
@@ -188,12 +194,13 @@ class Regressor2(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.3 if is_training else 0.0
-        x = hk.Linear(16)(x)
+        i0 = hki.VarianceScaling(1.0)
+        x = hk.Linear(16, w_init=i0)(x)
         x = jnn.relu(x)
-        x = hk.Linear(32)(x)
+        x = hk.Linear(32, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        return hk.Linear(1)(x)
+        return hk.Linear(1, w_init=i0)(x)
 
 
 class Regressor3(hk.Module):
@@ -202,15 +209,16 @@ class Regressor3(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.5 if is_training else 0.0
-        x = hk.Linear(32)(x)
+        i0 = hki.VarianceScaling(1.0)
+        x = hk.Linear(32, w_init=i0)(x)
         x = jnn.relu(x)
-        x = hk.Linear(32)(x)
+        x = hk.Linear(32, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        x = hk.Linear(32)(x)
+        x = hk.Linear(32, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        return hk.Linear(1)(x)
+        return hk.Linear(1, w_init=i0)(x)
 
 
 class Regressor4(hk.Module):
@@ -219,18 +227,19 @@ class Regressor4(hk.Module):
 
     def __call__(self, x, is_training):
         dropout = 0.7 if is_training else 0.0
-        x = hk.Linear(64)(x)
+        i0 = hki.VarianceScaling(1.0)
+        x = hk.Linear(64, w_init=i0)(x)
         x = jnn.relu(x)
-        x = hk.Linear(64)(x)
+        x = hk.Linear(64, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        x = hk.Linear(64)(x)
+        x = hk.Linear(64, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        x = hk.Linear(64)(x)
+        x = hk.Linear(64, w_init=i0)(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
         x = jnn.relu(x)
-        return hk.Linear(1)(x)
+        return hk.Linear(1, w_init=i0)(x)
 
 
 class SuperRegressor(hk.Module):
@@ -244,11 +253,11 @@ class SuperRegressor(hk.Module):
         y3 = Regressor3()(x, is_training)
         y4 = Regressor4()(x, is_training)
 
-        p0 = jnp.abs(hk.get_parameter('r0w', shape=(1,), init=hki.Constant(0.22)))
-        p1 = jnp.abs(hk.get_parameter('r1w', shape=(1,), init=hki.Constant(0.18)))
-        p2 = jnp.abs(hk.get_parameter('r2w', shape=(1,), init=hki.Constant(0.19)))
-        p3 = jnp.abs(hk.get_parameter('r3w', shape=(1,), init=hki.Constant(0.21)))
-        p4 = jnp.abs(hk.get_parameter('r4w', shape=(1,), init=hki.Constant(0.2)))
+        p0 = jnp.abs(hk.get_parameter('r0w', shape=(1,), init=hki.Constant(0.3)))
+        p1 = jnp.abs(hk.get_parameter('r1w', shape=(1,), init=hki.Constant(0.13)))
+        p2 = jnp.abs(hk.get_parameter('r2w', shape=(1,), init=hki.Constant(0.16)))
+        p3 = jnp.abs(hk.get_parameter('r3w', shape=(1,), init=hki.Constant(0.25)))
+        p4 = jnp.abs(hk.get_parameter('r4w', shape=(1,), init=hki.Constant(0.15)))
 
         w_sum = p0 + p1 + p2 + p3 + p4
 
@@ -317,11 +326,11 @@ def main():
     forward_apply = forward_fn.apply
     loss_fn = ft.partial(lm_loss_fn, forward_apply)
 
-    scheduler = optax.exponential_decay(init_value=0.04, transition_steps=100, decay_rate=0.99)
+    scheduler = optax.exponential_decay(init_value=0.1, transition_steps=100, decay_rate=0.99)
 
     optimizer = optax.chain(
         optax.adaptive_grad_clip(1.0),
-        optax.scale_by_adam(),
+        optax.scale_by_radam(),
         optax.scale_by_schedule(scheduler),
         optax.scale(-1.0)
     )
@@ -331,14 +340,14 @@ def main():
     num_steps, rng2, params, opt_state = updater.init(rng_key, x[0, :])
     rng1, rng = jr.split(rng)
 
-    for i in range(400):
+    for i in range(186):
         num_steps, rng1, params, opt_state, metrics = updater.update(num_steps, rng1, params, opt_state, x, y)
         print(f"Loss metrics at epoch {i} is {metrics}")
 
     logging.info(f"Computing predictions...................")
     forward_apply = jax.jit(forward_apply, static_argnames=['is_training'])
     result = forward_apply(params, rng, x_test, is_training=False)
-    result = np.power(10, result).clip(0, 600000).ravel()
+    result = (10 ** result).clip(0, 600000).ravel()
 
     output = pd.DataFrame({'Id': test_ds['Id'], 'SalePrice': result})
     output.to_csv('./data/submission.csv', index=False)
