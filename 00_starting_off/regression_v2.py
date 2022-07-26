@@ -27,8 +27,8 @@ import jax.random as jr
 import functools as ft
 
 def load_boost():
-    df_train = pd.read_csv('./data/regression/train.csv')
-    df_test = pd.read_csv('./data/regression/test.csv')
+    df_train = pd.read_csv('../data/regression/train.csv')
+    df_test = pd.read_csv('../data/regression/test.csv')
 
     cat_none_var = ["PoolQC", "MiscFeature", "Alley", "Fence", "FireplaceQu", "GarageFinish", "GarageQual", "GarageCond", "GarageType"]
     cat_nb_var = ["BsmtExposure", "BsmtFinType2", "BsmtCond", "BsmtQual", "BsmtFinType1"]
