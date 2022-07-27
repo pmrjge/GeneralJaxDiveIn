@@ -45,7 +45,7 @@ class SelfAttention(fnn.Module):
         energy = jnp.einsum('...qhd,...khd->...hqk', q, k)
 
         if mask is not None:
-            energy = jnp.where(mask == 0, -1e20, energy)
+            energy = jnp.where(mask == 0, -jnp.inf, energy)
 
         attention = fnn.softmax(energy / (self.embed_size ** 0.5), axis=3)
 
@@ -82,6 +82,61 @@ class TransformBlock(fnn.Module):
         f = ff(sc)
         sc1 = norm2(f + sc)
         return fnn.Dropout(dr)(sc1)
+
+
+class PositionalEmbedding(fnn.Module):
+    max_seq_len: int
+    embed_size: int
+
+    def setup(self):
+        pe = jnp.zeros(self.max_seq_len, self.embed_size)
+        for pos in range(self.max_seq_len):
+            for i in range(0, self.embed_dim, 2):
+                pe = pe.at[pos, i].set(jnp.sin(pos / (10000 ** ((2 * i) / self.embed_size))))
+                pe = pe.at[pos, i+1].set(jnp.cos(pos / (10000 ** ((2 * (i+1)) / self.embed_size))))
+
+        pe = np.expand_dims(pe, axis=0)
+        self.pe = pe
+
+    @fnn.compact
+    def __call__(self, x):
+        n = x.shape[1]
+        return self.pe[:, :n]
+
+
+class Encoder(fnn.Module):
+    vocab_size: int
+    embed_size: int
+    num_layers: int
+    n_heads: int
+    forward_expansion: int
+    dropout_rate: float
+    seq_len: int
+    w_init: Callable = fi.lecun_normal()
+    b_init: Callable = fi.zeros
+
+    @fnn.compact
+    def __call__(self, x, mask, train=True):
+        dr = self.dropout_rate if train else 0.0
+
+        # Define layers
+        word_e = fnn.Embed(self.vocab_size, self.embed_size)
+        pos_e = PositionalEmbedding(max_seq_len=self.seq_len, embed_size=self.embed_size)
+        blocks = [TransformBlock(embed_size=self.embed_size, n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate) for _ in range(self.num_layers)]
+        fc = fnn.Sequential([fnn.Dense(256, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(128, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(2, kernel_init=self.w_init, bias_init=self.b_init)])
+
+        # Compute
+        embed_out = word_e(x)
+        e = embed_out + pos_e(embed_out)
+        e = fnn.Dropout(dr)(e, deterministic=not train)
+
+        for block in blocks:
+            e = block(e, e, e, mask, train=train)
+
+        return fc(e)
+
+
+
 
 
 
