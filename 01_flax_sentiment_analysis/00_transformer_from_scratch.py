@@ -1,4 +1,5 @@
 import pickle
+import functools as ft
 from typing import Callable
 
 import flax
@@ -8,13 +9,13 @@ import jax.numpy as jnp
 import jax.nn as jnn
 import flax.linen as fnn
 import flax.linen.initializers as fi
+import optax
 from flax.core import freeze, unfreeze
 import numpy as np
 import einops as eps
 
-import nltk
-from nltk import word_tokenize
-from gensim.corpora.dictionary import Dictionary
+
+
 
 
 class SelfAttention(fnn.Module):
@@ -69,7 +70,7 @@ class TransformBlock(fnn.Module):
     b_init: Callable = fi.zeros
 
     @fnn.compact
-    def __call__(self, value, key, query, mask, train=True):
+    def __call__(self, value, key, query, mask,  *, train):
         dr = self.dropout_rate if train else 0.0
         attention = SelfAttention(embed_size=self.embed_size, n_heads=self.n_heads)
         norm1 = fnn.LayerNorm(bias_init=fi.zeros, scale_init=fi.ones)
@@ -121,7 +122,7 @@ class Encoder(fnn.Module):
     b_init: Callable = fi.zeros
 
     @fnn.compact
-    def __call__(self, x, mask, train=True):
+    def __call__(self, x, mask,  *, train):
         dr = self.dropout_rate if train else 0.0
 
         # Define layers
@@ -156,7 +157,7 @@ class TransformerEncoder(fnn.Module):
         return jnp.expand_dims(x != self.pad_idx, axis=(1, 2))
 
     @fnn.compact
-    def __call__(self, x, train=False):
+    def __call__(self, x, *, train):
         encoder = Encoder(vocab_size=self.vocab_size, embed_size=self.embed_size, num_layers=self.num_layers, n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate)
 
         mask = self.make_mask(x)
@@ -168,19 +169,26 @@ class TransformerEncoder(fnn.Module):
 with open('../data/sentiment_analysis/train_data.dict', 'rb') as f:
     data = pickle.load(f)
 
-xTrain = data['x_train']
-yTrain = data['y_train']
-xTest = data['x_test']
+xTrain = jnp.array(data['x_train'])
+yTrain = jnp.array(data['y_train'])
+xTest = jnp.array(data['x_test'])
 vocab_count = data['vc']
 vocab = data['vocab']
 
+# Init network
 
 @jax.jit
-def retrieve_params(x, rng):
+def params_and_model(x, rng):
     init_shape = jnp.ones_like(x, dtype=jnp.float32)
-    initial_params = TransformerEncoder(vocab_size=vocab_count).init(rng, init_shape)['params']
-    return initial_params
+    encoder = TransformerEncoder(vocab_size=vocab_count, embed_size=512, num_layers=6, n_heads=8, forward_expansion=8, dropout_rate=0.3, seq_len=60, pad_idx=0)
+    initial_params = encoder.init(rng, init_shape)
+    return encoder, initial_params
 
+# Initialize randomness source
+rng = jr.PRNGKey(111)
+r1, rng = jr.split(rng)
+
+SA, params = params_and_model(xTrain[0, :], r1)
 
 def make_generator(x_train, y_train, batch_size):
     n = x_train.shape[0]
@@ -198,6 +206,12 @@ def make_generator(x_train, y_train, batch_size):
     return generate_epoch
 
 
+@ft.partial(jax.jit, static_argnames=('apply', 'train'))
+def binary_cross_entropy_loss(apply, params, rng, bx, by, train=True):
+    logits = apply(params, rng, bx, train=train)
 
+    labels = fnn.one_hot(by, num_classes=2)
+
+    return jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=labels))
 
 
