@@ -19,7 +19,7 @@ class SelfAttention(fnn.Module):
     b_init: Callable = fi.zeros
 
     @fnn.compact
-    def __call__(self, v, k, q, mask=None, train=True):
+    def __call__(self, v, k, q, mask=None):
         # Compute head dimension and guarantee embed_size is divisible by n_heads to split the input
         head_dim = self.embed_size // self.n_heads
         assert (head_dim * self.n_heads == self.embed_size)
@@ -42,14 +42,33 @@ class SelfAttention(fnn.Module):
         k = keys(k)
         q = query(q)
 
-        energy = jnp.einsum_path('nqhd,nkhd -> nhqk', [q, k])
+        energy = jnp.einsum('...qhd,...khd->...hqk', q, k)
 
         if mask is not None:
             energy = jnp.where(mask == 0, -1e20, energy)
 
         attention = fnn.softmax(energy / (self.embed_size ** 0.5), axis=3)
 
-        out = jnp.einsum_path('nhql,nlhd -> nqhd', [attention, v])
+        out = jnp.einsum('...hql,...lhd->...qhd', attention, v)
         out = eps.rearrange(out, 'n q h d -> n q (h d)')
 
         return fc_out(out)
+
+
+class TransformBlock(fnn.Module):
+    embed_size: int
+    n_heads: int
+    forward_expansion: int
+    w_init: Callable = fi.lecun_normal()
+    b_init: Callable = fi.zeros
+
+    @fnn.compact
+    def __call__(self, x):
+        attention = SelfAttention(embed_size=self.embed_size, n_heads=self.n_heads)
+        norm1 = fnn.LayerNorm(bias_init=fi.zeros, scale_init=fi.ones)
+        norm2 = fnn.LayerNorm(bias_init=fi.zeros, scale_init=fi.ones)
+
+
+
+
+
