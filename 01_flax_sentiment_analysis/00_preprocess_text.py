@@ -88,12 +88,12 @@ tokenizer = Tokenizer()
 tokenizer.oov_token = '<oovToken>'
 tokenizer.fit_on_texts(train.text)
 vocab = tokenizer.word_index
-vocab_count = len(vocab) + 1
+vocab_count = len(vocab)+1
 
-xTrain = pad_sequences(tokenizer.texts_to_sequences(train.text.to_numpy()), padding='pre')
+xTrain = pad_sequences(tokenizer.texts_to_sequences(train.text.to_numpy()), padding='pre', maxlen=60)
 yTrain = train.target.to_numpy()
 
-xTest = pad_sequences(tokenizer.texts_to_sequences(test.text.to_numpy()), padding='pre')
+xTest = pad_sequences(tokenizer.texts_to_sequences(test.text.to_numpy()), padding='pre', maxlen=60)
 
 train_dict = {'x_train': xTrain, 'y_train': yTrain, 'x_test': xTest, 'vc': vocab_count, 'vocab': vocab}
 

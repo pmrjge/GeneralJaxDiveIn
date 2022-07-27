@@ -150,7 +150,7 @@ class TransformerEncoder(fnn.Module):
     n_heads: int = 8
     forward_expansion: int = 8
     dropout_rate: float = 0.3
-    seq_len: int = 70
+    seq_len: int = 60
     pad_idx: int = 0
 
     def make_mask(self, x):
@@ -158,37 +158,45 @@ class TransformerEncoder(fnn.Module):
 
     @fnn.compact
     def __call__(self, x, *, train):
-        encoder = Encoder(vocab_size=self.vocab_size, embed_size=self.embed_size, num_layers=self.num_layers, n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate)
+        encoder = Encoder(vocab_size=self.vocab_size, embed_size=self.embed_size, num_layers=self.num_layers,
+                          n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate,
+                          seq_len=self.seq_len)
 
         mask = self.make_mask(x)
 
-        return encoder(x, mask, train)
+        return encoder(x, mask, train=train)
 
 
 # Load data
 with open('../data/sentiment_analysis/train_data.dict', 'rb') as f:
     data = pickle.load(f)
 
-xTrain = jnp.array(data['x_train'])
-yTrain = jnp.array(data['y_train'])
-xTest = jnp.array(data['x_test'])
+xTrain = jnp.array(data['x_train'], dtype=jnp.int32)
+yTrain = jnp.array(data['y_train'], dtype=jnp.int32)
+xTest = jnp.array(data['x_test'], dtype=jnp.int32)
 vocab_count = data['vc']
 vocab = data['vocab']
 
+print(xTrain[0, :])
+
 # Init network
+
 
 @jax.jit
 def params_and_model(x, rng):
-    init_shape = jnp.ones_like(x, dtype=jnp.float32)
+    init_shape = jnp.ones_like(x, dtype=jnp.int32)
     encoder = TransformerEncoder(vocab_size=vocab_count, embed_size=512, num_layers=6, n_heads=8, forward_expansion=8, dropout_rate=0.3, seq_len=60, pad_idx=0)
-    initial_params = encoder.init(rng, init_shape)
+    initial_params = encoder.init(rng, init_shape, train=False)
     return encoder, initial_params
 
-# Initialize randomness source
-rng = jr.PRNGKey(111)
-r1, rng = jr.split(rng)
 
-SA, params = params_and_model(xTrain[0, :], r1)
+# Initialize randomness source
+main_rng = jr.PRNGKey(111)
+r1, rng = jr.split(main_rng)
+
+s_a, params = params_and_model(xTrain[0, :], r1)
+apply = jax.jit(s_a.apply, static_argnames=('train',))
+
 
 def make_generator(x_train, y_train, batch_size):
     n = x_train.shape[0]
@@ -202,16 +210,18 @@ def make_generator(x_train, y_train, batch_size):
             i0 = i * batch_size
             i1 = (i+1) * batch_size
             vi = perm[i0:i1]
-            yield jnp.array(x_train[vi], dtype=jnp.float32), jnp.array(y_train[vi], dtype=jnp.int32)
+            yield jnp.array(x_train[vi], dtype=jnp.int32), jnp.array(y_train[vi], dtype=jnp.int32)
     return generate_epoch
 
 
 @ft.partial(jax.jit, static_argnames=('apply', 'train'))
-def binary_cross_entropy_loss(apply, params, rng, bx, by, train=True):
+def cross_entropy_loss(apply, params, rng, bx, by, train=True):
     logits = apply(params, rng, bx, train=train)
 
     labels = fnn.one_hot(by, num_classes=2)
 
     return jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=labels))
 
+
+# Code below is not multi-device
 
