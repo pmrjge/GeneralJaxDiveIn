@@ -59,14 +59,31 @@ class TransformBlock(fnn.Module):
     embed_size: int
     n_heads: int
     forward_expansion: int
+    dropout_rate: float
     w_init: Callable = fi.lecun_normal()
     b_init: Callable = fi.zeros
 
     @fnn.compact
-    def __call__(self, x):
+    def __call__(self, value, key, query, mask, train=True):
+        dr = self.dropout_rate if train else 0.0
         attention = SelfAttention(embed_size=self.embed_size, n_heads=self.n_heads)
         norm1 = fnn.LayerNorm(bias_init=fi.zeros, scale_init=fi.ones)
         norm2 = fnn.LayerNorm(bias_init=fi.zeros, scale_init=fi.ones)
+
+        ff = fnn.Sequential([
+            fnn.Dense(self.forward_expansion * self.embed_size, kernel_init=self.w_init, bias_init=self.b_init),
+            fnn.gelu,
+            fnn.Dense(self.embed_size, kernel_init=self.w_init, bias_init=self.b_init),
+        ])
+
+        a0 = attention(value, key, query, mask)
+        sc = norm1(a0 + query)
+        sc = fnn.Dropout(dr)(sc, deterministic=not train)
+        f = ff(sc)
+        sc1 = norm2(f + sc)
+        return fnn.Dropout(dr)(sc1)
+
+
 
 
 
