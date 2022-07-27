@@ -3,6 +3,7 @@ from typing import Callable
 import flax
 import jax
 import jax.random as jr
+import jax.numpy as jnp
 import flax.linen as fnn
 import flax.linen.initializers as fi
 from flax.core import freeze, unfreeze
@@ -36,6 +37,6 @@ class SelfAttention(fnn.Module):
         k = k.reshape(n, key_len, self.n_heads, self.head_dim)
         q = q.reshape(n, query_len, self.n_heads, self.head_dim)
 
-
+        energy = jnp.einsum_path('nqhd,nkhd -> nhqk', [q, k])
 
 
