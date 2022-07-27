@@ -1,3 +1,4 @@
+import pickle
 from typing import Callable
 
 import flax
@@ -127,7 +128,7 @@ class Encoder(fnn.Module):
         word_e = fnn.Embed(self.vocab_size, self.embed_size)
         pos_e = PositionalEmbedding(max_seq_len=self.seq_len, embed_size=self.embed_size)
         blocks = [TransformBlock(embed_size=self.embed_size, n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate) for _ in range(self.num_layers)]
-        fc = fnn.Sequential([fnn.Dense(256, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(128, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(2, kernel_init=self.w_init, bias_init=self.b_init)])
+        fc = fnn.Sequential([fnn.Dense(512, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(256, kernel_init=self.w_init, bias_init=self.b_init), fnn.Dense(2, kernel_init=self.w_init, bias_init=self.b_init)])
 
         # Compute
         embed_out = word_e(x)
@@ -137,22 +138,22 @@ class Encoder(fnn.Module):
         for block in blocks:
             e = block(e, e, e, mask, train=train)
 
-        logits = fc(e)
-        return logits - fnn.logsumexp(logits)
+        return fc(e)
+        # - fnn.logsumexp(logits)
 
 
 class TransformerEncoder(fnn.Module):
     vocab_size: int
-    embed_size: int = 256
+    embed_size: int = 512
     num_layers: int = 8
     n_heads: int = 8
-    forward_expansion: int = 4
+    forward_expansion: int = 8
     dropout_rate: float = 0.3
     seq_len: int = 70
-    src_pad_idx: int
+    pad_idx: int = 0
 
     def make_mask(self, x):
-        return jnp.expand_dims(x != self.src_pad_idx, axis=(1, 2))
+        return jnp.expand_dims(x != self.pad_idx, axis=(1, 2))
 
     @fnn.compact
     def __call__(self, x, train=False):
@@ -163,7 +164,38 @@ class TransformerEncoder(fnn.Module):
         return encoder(x, mask, train)
 
 
+# Load data
+with open('../data/sentiment_analysis/train_data.dict', 'rb') as f:
+    data = pickle.load(f)
 
+xTrain = data['x_train']
+yTrain = data['y_train']
+xTest = data['x_test']
+vocab_count = data['vc']
+vocab = data['vocab']
+
+
+@jax.jit
+def retrieve_params(x, rng):
+    init_shape = jnp.ones_like(x, dtype=jnp.float32)
+    initial_params = TransformerEncoder(vocab_size=vocab_count).init(rng, init_shape)['params']
+    return initial_params
+
+
+def make_generator(x_train, y_train, batch_size):
+    n = x_train.shape[0]
+    num_batches = n // batch_size
+
+    def generate_epoch(rng_key):
+        rng, _ = jr.split(rng_key)
+
+        perm = jr.permutation(rng, n, axis=0)
+        for i in range(num_batches):
+            i0 = i * batch_size
+            i1 = (i+1) * batch_size
+            vi = perm[i0:i1]
+            yield jnp.array(x_train[vi], dtype=jnp.float32), jnp.array(y_train[vi], dtype=jnp.int32)
+    return generate_epoch
 
 
 

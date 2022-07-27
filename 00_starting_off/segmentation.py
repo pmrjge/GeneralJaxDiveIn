@@ -16,7 +16,6 @@ import optax
 import pandas as pd
 
 import imageio
-import tifffile
 import cv2
 from PIL import Image
 
