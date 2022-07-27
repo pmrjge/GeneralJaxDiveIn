@@ -4,12 +4,16 @@ import flax
 import jax
 import jax.random as jr
 import jax.numpy as jnp
+import jax.nn as jnn
 import flax.linen as fnn
 import flax.linen.initializers as fi
 from flax.core import freeze, unfreeze
-import jax.nn as jnn
 import numpy as np
 import einops as eps
+
+import nltk
+from nltk import word_tokenize
+from gensim.corpora.dictionary import Dictionary
 
 
 class SelfAttention(fnn.Module):
