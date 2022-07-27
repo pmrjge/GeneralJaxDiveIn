@@ -95,7 +95,7 @@ class PositionalEmbedding(fnn.Module):
                 pe = pe.at[pos, i].set(jnp.sin(pos / (10000 ** ((2 * i) / self.embed_size))))
                 pe = pe.at[pos, i+1].set(jnp.cos(pos / (10000 ** ((2 * (i+1)) / self.embed_size))))
 
-        pe = np.expand_dims(pe, axis=0)
+        pe = jnp.expand_dims(pe, axis=0)
         self.pe = pe
 
     @fnn.compact
@@ -133,9 +133,30 @@ class Encoder(fnn.Module):
         for block in blocks:
             e = block(e, e, e, mask, train=train)
 
-        return fc(e)
+        logits = fc(e)
+        return logits - fnn.logsumexp(logits)
 
 
+class TransformerEncoder(fnn.Module):
+    vocab_size: int
+    embed_size: int = 256
+    num_layers: int = 8
+    n_heads: int = 8
+    forward_expansion: int = 4
+    dropout_rate: float = 0.3
+    seq_len: int = 70
+    src_pad_idx: int
+
+    def make_mask(self, x):
+        return jnp.expand_dims(x != self.src_pad_idx, axis=(1, 2))
+
+    @fnn.compact
+    def __call__(self, x, train=False):
+        encoder = Encoder(vocab_size=self.vocab_size, embed_size=self.embed_size, num_layers=self.num_layers, n_heads=self.n_heads, forward_expansion=self.forward_expansion, dropout_rate=self.dropout_rate)
+
+        mask = self.make_mask(x)
+
+        return encoder(x, mask, train)
 
 
 
