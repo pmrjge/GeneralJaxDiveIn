@@ -195,7 +195,7 @@ class ParamsUpdater:
 
     def init(self, main_rng, x):
         out_rng, init_rng = jax.random.split(main_rng)
-        params, state = self._net_init(init_rng, x)
+        params, state = self._net_init(init_rng, x, is_training=False)
         opt_state = self._opt.init(params)
         return jnp.array(0), out_rng, params, state, opt_state
 
