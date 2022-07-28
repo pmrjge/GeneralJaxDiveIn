@@ -98,7 +98,7 @@ class ViT(hk.Module):
             encoded_patches = x3 + x2
 
         representation = self.norm()(encoded_patches)
-        #representation = einops.rearrange(representation, 'b h t -> b (h t)')
+        representation = einops.rearrange(representation, 'b h t -> b (h t)')
         representation = hk.dropout(hk.next_rng_key(), dropout, representation)
 
         features = MLP(self.mlp_head_units, self.dropout)(representation, is_training=is_training)
@@ -166,7 +166,7 @@ rng = jr.PRNGKey(0)
 def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10):
     logits, state = forward_fn(params, state, rng, a, is_training=is_training)
 
-    l2_loss = 0.1 * jnp.sum(jnp.array((jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)), dtype=jnp.float32))
+    l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
     return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-8 * l2_loss, state
 
@@ -223,6 +223,7 @@ rng1, rng2 = jr.split(rng)
 
 epoch_gen_temp = process_gen(rng1)
 bx, _ = next(epoch_gen_temp)
+bx = jnp.expand_dims(bx, axis=0)
 
 num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
@@ -236,6 +237,6 @@ for i in tqdm(range(100)):
     rng1, rng2, rng = jr.split(rng, 3)
     for step, (bx, by) in enumerate(process_gen(rng1)):
         num_steps, rng2, params, state, opt_state, metrics = upd_fn(num_steps, rng2, params, state, opt_state, bx, by)
-        if (i + 1) % 20 == 0:
+        if (step + 1) % 20 == 0:
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
