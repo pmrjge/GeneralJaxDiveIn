@@ -20,7 +20,7 @@ tf.config.experimental.set_visible_devices([], "GPU")
 
 
 class PreProcessPatches:
-    def __init__(self, patch_size=8):
+    def __init__(self, patch_size):
         self.patch_size = patch_size
 
     def __call__(self, images):
@@ -134,4 +134,96 @@ def process_epoch_gen(a, b, batch_size, patch_size):
 
     return epoch_generator
 
+
+batch_size = 42
+patch_size = 8
+
+process_gen = process_epoch_gen(x, y, batch_size, patch_size)
+
+patch_dim = 96 // patch_size
+
+
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+    def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
+        return ViT(num_patches=num_patches, projection_dim=projection_dim,
+                   num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
+                   transformer_units_2=transformer_units_2, mlp_head_units=mlp_head_units,
+                   dropout=dropout)(dgt, is_training=is_training)
+
+    return forward_fn
+
+
+ffn = build_forward_fn()
+ffn = hk.transform_with_state(ffn)
+
+apply = ffn.apply
+fast_apply = jax.jit(apply, static_argnames=('is_training',))
+
+rng = jr.PRNGKey(0)
+
+@ft.partial(jax.jit, static_argnums=(0, 6, 7))
+def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10):
+    logits, state = forward_fn(params, state, rng, a, is_training)
+
+    l2_loss = 0.1 * jnp.sum(jnp.array((jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)), dtype=jnp.float32))
+    labels = jnn.one_hot(b, num_classes=num_classes)
+    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-8 * l2_loss, state
+
+
+loss_fn = ft.partial(ce_loss_fn, fast_apply)
+
+learning_rate = 0.01
+grad_clip_value = 1.0
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=10, decay_rate=0.99)
+
+optimizer = optax.chain(
+    optax.adaptive_grad_clip(grad_clip_value),
+    #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
+    optax.scale_by_radam(),
+    #optax.scale_by_adam(),
+    optax.scale_by_schedule(scheduler),
+    optax.scale(-1.0)
+)
+
+
+class ParamsUpdater:
+    def __init__(self, net_init, loss, optimizer: optax.GradientTransformation):
+        self._net_init = net_init
+        self._loss = loss
+        self._opt = optimizer
+
+    def init(self, main_rng, x):
+        out_rng, init_rng = jax.random.split(main_rng)
+        params, state = self._net_init(init_rng, x)
+        opt_state = self._opt.init(params)
+        return jnp.array(0), out_rng, params, state, opt_state
+
+    def update(self, num_steps, rng, params, state, opt_state, bx: jnp.ndarray, by: jnp.ndarray):
+        rng, new_rng = jax.random.split(rng)
+
+        (loss, state), grads = jax.value_and_grad(self._loss, has_aux=True)(params, state, rng, bx, by)
+
+        updates, opt_state = self._opt.update(grads, opt_state, params)
+
+        params = optax.apply_updates(params, updates)
+
+        metrics = {
+            'step': num_steps,
+            'loss': loss,
+        }
+
+        return num_steps + 1, new_rng, params, state, opt_state, metrics
+
+
+updater = ParamsUpdater(ffn.init, loss_fn, optimizer)
+
+print("Initializing parameters")
+rng1, rng2 = jr.split(rng)
+
+epoch_gen = process_gen(rng1)
+bx, _ = next(epoch_gen)
+
+num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
+
+# Training loop
 
