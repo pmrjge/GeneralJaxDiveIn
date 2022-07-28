@@ -15,6 +15,7 @@ import haiku as hk
 import haiku.initializers as hki
 
 import tensorflow as tf
+from tqdm import tqdm
 
 tf.config.experimental.set_visible_devices([], "GPU")
 
@@ -217,13 +218,24 @@ class ParamsUpdater:
 
 updater = ParamsUpdater(ffn.init, loss_fn, optimizer)
 
-print("Initializing parameters")
+print("Initializing parameters..........................")
 rng1, rng2 = jr.split(rng)
 
-epoch_gen = process_gen(rng1)
-bx, _ = next(epoch_gen)
+epoch_gen_temp = process_gen(rng1)
+bx, _ = next(epoch_gen_temp)
 
 num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
+print("Starting training loop..........................")
+num_epochs = 100
+
+upd_fn = jax.jit(updater.update)
+
+for i in tqdm(range(100)):
+    rng1, rng2, rng = jr.split(rng, 3)
+    for step, (bx, by) in enumerate(process_gen(rng1)):
+        num_steps, rng2, params, state, opt_state, metrics = upd_fn(num_steps, rng2, params, state, opt_state, bx, by)
+        if (i + 1) % 20 == 0:
+            print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
