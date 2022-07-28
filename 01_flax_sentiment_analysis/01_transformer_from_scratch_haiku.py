@@ -46,3 +46,22 @@ class SelfAttention(hk.Module):
 
         return jnp.einsum('b i j, b j d -> b i d', attention, v)
 
+
+class MultiHeadSelfAttention(hk.Module):
+    def __init__(self, dim, heads=8, dim_head=None):
+        super(MultiHeadSelfAttention, self).__init__()
+        self.dim_head = dim // heads if dim_head is None else dim_head
+        assert self.dim_head * heads == dim, "MultiHeadSelfAttention head dim and num heads don't agree"
+
+        self.factor = self.dim_head ** -0.5
+
+        self.dim = dim
+        self.heads = heads
+
+    def __call__(self, x, mask=None):
+        assert len(x.shape) == 3
+
+        w_init = hki.VarianceScaling()
+        qkv = hk.Linear(output_size=self.dim * 3, with_bias=False, w_init=w_init, b_init=hki.Constant(0))(x)
+
+        q, k, v = tuple(nps.rearrange(qkv, 'b t (d k h) -> k b h t d ', k=3, h=self.heads))
