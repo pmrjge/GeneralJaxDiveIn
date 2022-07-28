@@ -65,3 +65,59 @@ class MultiHeadSelfAttention(hk.Module):
         qkv = hk.Linear(output_size=self.dim * 3, with_bias=False, w_init=w_init, b_init=hki.Constant(0))(x)
 
         q, k, v = tuple(nps.rearrange(qkv, 'b t (d k h) -> k b h t d ', k=3, h=self.heads))
+
+        scaled_dot_prod = jnp.einsum('b h i d, b h j d -> b h i j', q, k) * self.factor
+
+        if mask is not None:
+            assert mask.shape == scaled_dot_prod.shape[2:]
+            scaled_dot_prod = jax.lax.select(mask, jax.lax.broadcast(-jnp.inf, scaled_dot_prod.shape), scaled_dot_prod)
+
+        attention = jnn.softmax(scaled_dot_prod, axis=-1)
+
+        out = jnp.einsum('b h i j, b h j d -> b h i d', attention, v)
+
+        out = nps.rearrange(out, "b h t d -> b t (h d)")
+
+        return hk.Linear(self.dim, with_bias=False, w_init=w_init, b_init=hki.Constant(0))(out)
+
+
+class LinearBlock(hk.Module):
+    def __init__(self, dim, dim_linear_block, dropout):
+        self.dim = dim
+        self.dim_linear_block = dim_linear_block
+        self.dropout = dropout
+        super(LinearBlock, self).__init__()
+
+    def __call__(self, x, *, is_training: bool):
+        dropout = self.dropout if is_training else 0.0
+
+        w_init = hki.VarianceScaling()
+        x = hk.Linear(self.dim_linear_block, w_init=w_init, b_init=hki.Constant(0))(x)
+        x = jnn.gelu(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        x = hk.Linear(self.dim, w_init=w_init, b_init=hki.Constant(0))(x)
+        return hk.dropout(hk.next_rng_key(), dropout, x)
+
+
+class TransformerBlock(hk.Module):
+    def __init__(self, dim, heads=8, dim_head=None, dim_linear_block=1024, dropout=0.1):
+        super(TransformerBlock, self).__init__()
+        self.dim = dim
+        self.dim_head = dim_head
+        self.heads = heads
+        self.dim_linear_block = dim_linear_block
+        self.dropout = dropout
+
+    def __call__(self, x, mask=None, *, is_training: bool):
+
+        scale_init = hki.Constant(1.0)
+        offset_init = hki.Constant(0.0)
+        norm = lambda: hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, scale_init=scale_init, offset_init=offset_init)
+        tmha = MultiHeadSelfAttention(self.dim, self.heads, self.dim_head)(x, mask)
+        tpx = norm()(tmha + x)
+
+        lout = LinearBlock(self.dim, self.dim_linear_block, self.dropout)(tpx, is_training=is_training)
+
+        return norm()(lout + tpx)
+
+
