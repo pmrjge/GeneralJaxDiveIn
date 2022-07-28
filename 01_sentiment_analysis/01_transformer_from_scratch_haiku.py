@@ -146,8 +146,8 @@ class PositionalEncodingSin(hk.Module):
         pe = jnp.zeros((1, seq_len, dim), dtype=jnp.float32)
         position = jnp.expand_dims(jnp.arange(0, seq_len, dtype=jnp.float32), axis=1)
         div_term = jnp.exp(jnp.arange(0, dim, 2).astype(float) * (-jnp.log(jnp.array([10000.0])) / dim))
-        pe = pe.at[..., 0::2] = jnp.sin(position * div_term)
-        pe = pe.at[..., 1::2] = jnp.cos(position * div_term)
+        pe = pe.at[..., 0::2].set(jnp.sin(position * div_term))
+        pe = pe.at[..., 1::2].set(jnp.cos(position * div_term))
 
         self.pe = pe
 
@@ -250,7 +250,7 @@ class ParamsUpdater:
 
     def init(self, main_rng, x):
         out_rng, init_rng = jax.random.split(main_rng)
-        params, state = self._net_init(init_rng, x)
+        params, state = self._net_init(init_rng, x, is_training=False)
         opt_state = self._opt.init(params)
         return jnp.array(0), out_rng, params, state, opt_state
 
