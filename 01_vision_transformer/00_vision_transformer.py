@@ -173,7 +173,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 0.01
+learning_rate = 0.001
 grad_clip_value = 1.0
 scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=10, decay_rate=0.99)
 
