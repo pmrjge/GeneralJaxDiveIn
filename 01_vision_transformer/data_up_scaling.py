@@ -30,19 +30,28 @@ train_x, train_y, test_x = load_dataset()
 
 train_res = np.zeros((train_x.shape[0], upscale, upscale, 1))
 
+print("Computing train data upscaling.................")
+
 for i in range(train_res.shape[0]):
     train_res[i, :, :, :] = np.array(tf.image.resize(tf.convert_to_tensor([train_x[i]]), size=(upscale, upscale)))
 
 test_res = np.zeros((test_x.shape[0], upscale, upscale, 1))
 
+print("Computing test data upscaling.................")
 for j in range(test_res.shape[0]):
     test_res[j, :, :, :] = np.array(tf.image.resize(tf.convert_to_tensor([test_x[j]]), size=(upscale, upscale)))
 
 
-img10 = ((train_res[9, :, :, :] * 255.0) + 128.0).astype(np.uint8)
+img14 = ((train_res[13, :, :, :] * 255.0) + 128.0).astype(np.uint8)
 
-plt.imshow(img10)
+plt.imshow(img14)
 plt.show()
+
+data_dict = {"train": train_res, "labels": train_y, "test": test_res}
+
+with open('../data/digits/data.dict', 'wb') as f:
+    pickle.dump(data_dict, f)
+
 
 
 
