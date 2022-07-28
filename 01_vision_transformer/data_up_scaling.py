@@ -42,9 +42,9 @@ for j in range(test_res.shape[0]):
     test_res[j, :, :, :] = np.array(tf.image.resize(tf.convert_to_tensor([test_x[j]]), size=(upscale, upscale)))
 
 
-img14 = ((train_res[13, :, :, :] * 255.0) + 128.0).astype(np.uint8)
+img1400 = ((train_res[1399, :, :, :] * 255.0) + 128.0).astype(np.uint8)
 
-plt.imshow(img14)
+plt.imshow(img1400)
 plt.show()
 
 data_dict = {"train": train_res, "labels": train_y, "test": test_res}
