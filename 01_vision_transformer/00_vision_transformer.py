@@ -62,7 +62,7 @@ class MLP(hk.Module):
         dropout = self.dropout if is_training else 0.0
         w_init = hki.VarianceScaling()
         b_init = hki.Constant(0)
-        for units in range(self.hidden_units):
+        for units in self.hidden_units:
             x = hk.Linear(units, w_init=w_init, b_init=b_init)(x)
             x = jnn.gelu(x, approximate=False)
             x = hk.dropout(hk.next_rng_key(), dropout, x)
@@ -93,12 +93,12 @@ class ViT(hk.Module):
             attention = hk.MultiHeadAttention(self.num_heads, self.projection_dim // self.num_heads, w_init=w_init)(x1, x1, x1)
             x2 = attention + encoded_patches
             x3 = self.norm()(x2)
-            x3 = MLP([self.transformer_units_1, self.transformer_units_2], self.dropout)(x3, is_training=is_training)
+            x3 = MLP((self.transformer_units_1, self.transformer_units_2), self.dropout)(x3, is_training=is_training)
 
             encoded_patches = x3 + x2
 
         representation = self.norm()(encoded_patches)
-        representation = einops.rearrange(representation, 'b h t -> b (h t)')
+        #representation = einops.rearrange(representation, 'b h t -> b (h t)')
         representation = hk.dropout(hk.next_rng_key(), dropout, representation)
 
         features = MLP(self.mlp_head_units, self.dropout)(representation, is_training=is_training)
@@ -164,7 +164,7 @@ rng = jr.PRNGKey(0)
 
 @ft.partial(jax.jit, static_argnums=(0, 6, 7))
 def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10):
-    logits, state = forward_fn(params, state, rng, a, is_training)
+    logits, state = forward_fn(params, state, rng, a, is_training=is_training)
 
     l2_loss = 0.1 * jnp.sum(jnp.array((jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)), dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
