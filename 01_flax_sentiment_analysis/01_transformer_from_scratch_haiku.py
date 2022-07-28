@@ -121,3 +121,44 @@ class TransformerBlock(hk.Module):
         return norm()(lout + tpx)
 
 
+class TransformerEncoder(hk.Module):
+    def __init__(self, dim, blocks=6, heads=8, dim_head=None, dim_linear_block=1024, dropout=0.1):
+        super(TransformerEncoder, self).__init__()
+        self.dim = dim
+        self.blocks = blocks
+        self.heads = heads
+        self.dim_head = dim_head
+        self.dim_linear_block = dim_linear_block
+        self.dropout = dropout
+
+    def __call__(self, x, mask=None, *, is_training: bool):
+
+        for _ in range(self.blocks):
+            x = TransformerBlock(self.dim, self.heads, self.dim_head, self.dim_linear_block, self.dropout)(x, mask, is_training=is_training)
+        return x
+
+
+class PositionalEncodingSin(hk.Module):
+    def __init__(self, dim, dropout=0.1, seq_len=20000):
+        super(PositionalEncodingSin, self).__init__()
+        self.dropout = dropout
+        pe = jnp.zeros((1, seq_len, dim), dtype=jnp.float32)
+        position = jnp.expand_dims(jnp.arange(0, seq_len, dtype=jnp.float32), axis=1)
+        div_term = jnp.exp(jnp.arange(0, dim, 2).astype(float) * (-jnp.log(jnp.array([10000.0])) / dim))
+        pe = pe.at[..., 0::2] = jnp.sin(position * div_term)
+        pe = pe.at[..., 1::2] = jnp.cos(position * div_term)
+
+        self.pe = pe
+
+    @staticmethod
+    def expand_to_batch(tensor, desired_size):
+        tile = desired_size // tensor.shape[0]
+        return nps.repeat(tensor, 'b ... -> (b tile) ...', tile=tile)
+
+    def forward(self, x, *, is_training: bool):
+        dropout = self.dropout if is_training else 0.0
+
+        batch, seq_tokens, _ = x.shape
+        x = x + PositionalEncodingSin.expand_to_batch(self.pe[:, :seq_tokens, :], desired_size=batch)
+        return hk.dropout(hk.next_rng_key(), dropout, x)
+
