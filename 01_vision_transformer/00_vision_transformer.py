@@ -196,7 +196,7 @@ optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
     #optax.scale_by_radam(),
-    optax.scale_by_adam(),
+    optax.scale_by_adam(b1=0.95, eps=1e-3),
     #optax.scale_by_yogi(),
     #optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
