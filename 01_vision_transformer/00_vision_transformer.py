@@ -6,6 +6,7 @@ import jax
 import jax.nn as jnn
 import jax.random as jr
 import jax.numpy as jnp
+import numpy as np
 
 import optax
 
@@ -13,6 +14,7 @@ import einops
 
 import haiku as hk
 import haiku.initializers as hki
+import pandas as pd
 
 import tensorflow as tf
 from tqdm import tqdm
@@ -146,14 +148,14 @@ def process_epoch_gen(a, b, batch_size, patch_size):
 
 
 batch_size = 14
-patch_size = 6
+patch_size = 12
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
 patch_dim = 96 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=24, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -177,22 +179,23 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
     l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
-    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-6 * l2_loss, state
+    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-8 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
 learning_rate = 1e-4
 grad_clip_value = 1.0
-scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
+#scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
-    #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
+    #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
     #optax.scale_by_radam(),
     optax.scale_by_adam(),
-    optax.scale_by_schedule(scheduler),
-    optax.scale(-1.0)
+    #optax.scale_by_yogi(),
+    #optax.scale_by_schedule(scheduler),
+    optax.scale(-learning_rate)
 )
 
 
@@ -238,7 +241,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 100
+num_epochs = 4
 
 upd_fn = jax.jit(updater.update)
 
@@ -249,3 +252,22 @@ for i in range(num_epochs):
         if (step + 1) % 28 == 0:
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
+print("Starting evaluation loop........................")
+
+res = np.zeros(xt.shape[0], dtype=np.int64)
+
+bts = 10
+count = xt.shape[0] // bts
+
+proc = PreProcessPatches(patch_size=patch_size)
+
+for j in tqdm(range(count)):
+    rng, = jr.split(rng, 1)
+    a, b = j * bts, (j+1) * bts
+    pbt = proc(xt[a:b, :, :, :])
+    logits, _ = fast_apply(params, state, rng, pbt, is_training=False)
+    res[a:b] = np.array(jnp.argmax(jnn.softmax(logits), axis=1), dtype=np.int64)
+
+df = pd.DataFrame({'ImageId': np.arange(1, xt.shape[0]+1, dtype=np.int64), 'Label': res})
+
+df.to_csv('../data/digits/results.csv', index=False)
