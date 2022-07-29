@@ -4,8 +4,6 @@ import pandas as pd
 import tensorflow as tf
 import numpy as np
 
-import einops
-
 import matplotlib.pyplot as plt
 
 def load_dataset(filename='../data/digits/train.csv', filename1='../data/digits/test.csv'):
@@ -22,6 +20,24 @@ def load_dataset(filename='../data/digits/train.csv', filename1='../data/digits/
     test_x = test.reshape((-1, 28, 28, 1))
 
     return train_x, train_y, test_x
+
+
+class PreProcessPatches:
+    def __init__(self, patch_size):
+        self.patch_size = patch_size
+
+    def __call__(self, images):
+        batch_size = images.shape[0]
+        patches = tf.image.extract_patches(
+            images=images,
+            sizes=[1, self.patch_size, self.patch_size, 1],
+            strides=[1, self.patch_size, self.patch_size, 1],
+            rates=[1, 1, 1, 1],
+            padding="VALID"
+        )
+        patch_dims = patches.shape[-1]
+        patches = tf.reshape(patches, [batch_size, -1, patch_dims])
+        return jnp.array(patches.numpy(), dtype=jnp.float32)
 
 
 upscale = 96

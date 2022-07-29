@@ -17,24 +17,33 @@ import haiku.initializers as hki
 import tensorflow as tf
 from tqdm import tqdm
 
-tf.config.experimental.set_visible_devices([], "GPU")
-
+try:
+    # Disable all GPUS
+    tf.config.set_visible_devices([], 'GPU')
+    visible_devices = tf.config.get_visible_devices()
+    print(visible_devices)
+    for device in visible_devices:
+        assert device.device_type != 'GPU'
+except:
+    # Invalid device or cannot modify virtual devices once initialized.
+    print("Cannot change virtual devices")
 
 class PreProcessPatches:
     def __init__(self, patch_size):
         self.patch_size = patch_size
 
     def __call__(self, images):
-        batch_size = images.shape[0]
-        patches = tf.image.extract_patches(
-            images=images,
-            sizes=[1, self.patch_size, self.patch_size, 1],
-            strides=[1, self.patch_size, self.patch_size, 1],
-            rates=[1, 1, 1, 1],
-            padding="VALID"
-        )
-        patch_dims = patches.shape[-1]
-        patches = tf.reshape(patches, [batch_size, -1, patch_dims])
+        with tf.device('/CPU:0'):
+            batch_size = images.shape[0]
+            patches = tf.image.extract_patches(
+                images=images,
+                sizes=[1, self.patch_size, self.patch_size, 1],
+                strides=[1, self.patch_size, self.patch_size, 1],
+                rates=[1, 1, 1, 1],
+                padding="VALID"
+            )
+            patch_dims = patches.shape[-1]
+            patches = tf.reshape(patches, [batch_size, -1, patch_dims])
         return jnp.array(patches.numpy(), dtype=jnp.float32)
 
 
@@ -136,15 +145,15 @@ def process_epoch_gen(a, b, batch_size, patch_size):
     return epoch_generator
 
 
-batch_size = 42
-patch_size = 8
+batch_size = 14
+patch_size = 12
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
 patch_dim = 96 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=32, num_heads=8, transformer_units_1=1024, transformer_units_2=512, mlp_head_units=(512, 256), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -173,9 +182,9 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 0.001
+learning_rate = 1e-2
 grad_clip_value = 1.0
-scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=10, decay_rate=0.99)
+scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
@@ -229,14 +238,14 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 100
+num_epochs = 50
 
 upd_fn = jax.jit(updater.update)
 
-for i in tqdm(range(100)):
+for i in range(num_epochs):
     rng1, rng2, rng = jr.split(rng, 3)
-    for step, (bx, by) in enumerate(process_gen(rng1)):
+    for step, (bx, by) in tqdm(enumerate(process_gen(rng1)), total=42000 // batch_size):
         num_steps, rng2, params, state, opt_state, metrics = upd_fn(num_steps, rng2, params, state, opt_state, bx, by)
-        if (step + 1) % 20 == 0:
+        if (step + 1) % 28 == 0:
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
