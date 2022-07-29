@@ -6,6 +6,9 @@ import jax
 import jax.nn as jnn
 import jax.random as jr
 import jax.numpy as jnp
+
+from jax.scipy.special import logsumexp
+
 import numpy as np
 
 import optax
@@ -116,7 +119,7 @@ class ViT(hk.Module):
 
         logits = hk.Linear(10)(features)
 
-        return logits
+        return logits - logsumexp(logits, axis=1, keepdims=True)
 
 
 # Load dataset
@@ -180,12 +183,12 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
     l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
-    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-8 * l2_loss, state
+    return -jnp.mean(labels * logits) + 1e-6 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 3e-4
+learning_rate = 1e-4
 grad_clip_value = 1.0
 #scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -267,7 +270,7 @@ for j in tqdm(range(count)):
     a, b = j * bts, (j+1) * bts
     pbt = proc(xt[a:b, :, :, :])
     logits, _ = fast_apply(params, state, rng, pbt, is_training=False)
-    res[a:b] = np.array(jnp.argmax(jnn.softmax(logits), axis=1), dtype=np.int64)
+    res[a:b] = np.array(jnp.argmax(jnp.exp(logits), axis=1), dtype=np.int64)
 
 df = pd.DataFrame({'ImageId': np.arange(1, xt.shape[0]+1, dtype=np.int64), 'Label': res})
 
