@@ -151,14 +151,14 @@ def process_epoch_gen(a, b, batch_size, patch_size):
 
 
 batch_size = 14
-patch_size = 8
+patch_size = 12
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
 patch_dim = 96 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=12, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=24, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -177,13 +177,32 @@ fast_apply = jax.jit(apply, static_argnames=('is_training',))
 
 rng = jr.PRNGKey(0)
 
-@ft.partial(jax.jit, static_argnums=(0, 6, 7))
-def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10):
+
+@ft.partial(jax.jit, static_argnums=(0, 6, 7, 8, 9))
+def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10, gamma=3.0, alpha=4.0):
     logits, state = forward_fn(params, state, rng, a, is_training=is_training)
 
-    l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
-    return -jnp.mean(labels * logits) + 1e-6 * l2_loss, state
+
+    # Weight decay
+    l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+
+    logits = jnp.clip(logits, a_min=jnp.log(1e-9), a_max=jnp.log(1 - 1e-9))
+    ce = -labels * logits
+
+    # Cross entropy loss
+    loss = jnp.sum(ce, axis=1)
+    loss = jnp.mean(loss)
+
+    # Focal Loss
+    y_pred = jnp.exp(logits)
+    weight = labels * jnp.power(1 - y_pred, gamma)
+    f_loss = alpha * (weight * ce)
+    f_loss = jnp.sum(f_loss, axis=1)
+    f_loss = jnp.mean(f_loss)
+
+    # Cross-entropy weighted with focal loss and weight decay
+    return 0.1 * loss + f_loss + 1e-8 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
@@ -196,7 +215,7 @@ optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
     #optax.scale_by_radam(),
-    optax.scale_by_adam(b1=0.95, eps=1e-3),
+    optax.scale_by_adam(b1=0.9, eps=1e-6),
     #optax.scale_by_yogi(),
     #optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
@@ -245,7 +264,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 4
+num_epochs = 3
 
 upd_fn = jax.jit(updater.update)
 
