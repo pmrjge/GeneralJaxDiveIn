@@ -120,7 +120,7 @@ class ViT(hk.Module):
 
 
 # Load dataset
-with open('../data/digits/data.dict', 'rb') as f:
+with open('../data/digits/data1.dict', 'rb') as f:
     data = pickle.load(f)
 
 x = data['train']
@@ -148,11 +148,11 @@ def process_epoch_gen(a, b, batch_size, patch_size):
 
 
 batch_size = 14
-patch_size = 12
+patch_size = 16
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
-patch_dim = 96 // patch_size
+patch_dim = 192 // patch_size
 
 
 def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=24, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
@@ -166,6 +166,7 @@ def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num
 
 
 ffn = build_forward_fn()
+
 ffn = hk.transform_with_state(ffn)
 
 apply = ffn.apply
@@ -184,7 +185,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 1e-4
+learning_rate = 1e-3
 grad_clip_value = 1.0
 #scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -192,8 +193,8 @@ optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
     #optax.scale_by_radam(),
-    optax.scale_by_adam(),
-    #optax.scale_by_yogi(),
+    #optax.scale_by_adam(),
+    optax.scale_by_yogi(),
     #optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
 )

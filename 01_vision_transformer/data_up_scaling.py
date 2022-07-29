@@ -22,25 +22,7 @@ def load_dataset(filename='../data/digits/train.csv', filename1='../data/digits/
     return train_x, train_y, test_x
 
 
-class PreProcessPatches:
-    def __init__(self, patch_size):
-        self.patch_size = patch_size
-
-    def __call__(self, images):
-        batch_size = images.shape[0]
-        patches = tf.image.extract_patches(
-            images=images,
-            sizes=[1, self.patch_size, self.patch_size, 1],
-            strides=[1, self.patch_size, self.patch_size, 1],
-            rates=[1, 1, 1, 1],
-            padding="VALID"
-        )
-        patch_dims = patches.shape[-1]
-        patches = tf.reshape(patches, [batch_size, -1, patch_dims])
-        return jnp.array(patches.numpy(), dtype=jnp.float32)
-
-
-upscale = 96
+upscale = 192
 
 train_x, train_y, test_x = load_dataset()
 
@@ -65,7 +47,7 @@ plt.show()
 
 data_dict = {"train": train_res, "labels": train_y, "test": test_res}
 
-with open('../data/digits/data.dict', 'wb') as f:
+with open('../data/digits/data1.dict', 'wb') as f:
     pickle.dump(data_dict, f)
 
 
