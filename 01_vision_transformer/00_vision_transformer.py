@@ -146,14 +146,14 @@ def process_epoch_gen(a, b, batch_size, patch_size):
 
 
 batch_size = 14
-patch_size = 12
+patch_size = 6
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
 patch_dim = 96 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=32, num_heads=8, transformer_units_1=1024, transformer_units_2=512, mlp_head_units=(512, 256), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -177,20 +177,20 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
     l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     labels = jnn.one_hot(b, num_classes=num_classes)
-    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-8 * l2_loss, state
+    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-6 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 1e-2
+learning_rate = 1e-4
 grad_clip_value = 1.0
 scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.95, nesterov=True),
-    optax.scale_by_radam(),
-    #optax.scale_by_adam(),
+    #optax.scale_by_radam(),
+    optax.scale_by_adam(),
     optax.scale_by_schedule(scheduler),
     optax.scale(-1.0)
 )
@@ -238,7 +238,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 50
+num_epochs = 100
 
 upd_fn = jax.jit(updater.update)
 
