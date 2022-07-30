@@ -178,8 +178,16 @@ fast_apply = jax.jit(apply, static_argnames=('is_training',))
 rng = jr.PRNGKey(0)
 
 
-@ft.partial(jax.jit, static_argnums=(0, 6, 7, 8, 9))
-def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes:int = 10, gamma=3.0, alpha=4.0):
+def focal_loss(labels, y_pred, ce, gamma, alpha):
+    weight = labels * jnp.power(1 - y_pred, gamma)
+    f_loss = alpha * (weight * ce)
+    f_loss = jnp.sum(f_loss, axis=1)
+    f_loss = jnp.mean(f_loss, axis=0)
+    return f_loss
+
+
+@ft.partial(jax.jit, static_argnums=(0, 6, 7,))
+def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes: int = 10):
     logits, state = forward_fn(params, state, rng, a, is_training=is_training)
 
     labels = jnn.one_hot(b, num_classes=num_classes)
@@ -193,13 +201,12 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
     y_pred = jnp.exp(logits)
     # CE loss
-    #ce_loss = jnp.mean(ce)
+    ce_loss = jnp.sum(ce, axis=1)
+    ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Focal Loss
-    weight = labels * jnp.power(1 - y_pred, gamma)
-    f_loss = alpha * (weight * ce)
-    # f_loss = jnp.max(f_loss, axis=1)
-    f_loss = jnp.mean(f_loss)
+    f_loss = focal_loss(labels, y_pred, ce, 0.5, 4.0) + focal_loss(labels, y_pred, ce, 2.0, 4.0) + focal_loss(labels, y_pred, ce, 3.5, 2.0) + \
+        focal_loss(labels, y_pred, ce, 1.2, 1.0) + focal_loss(labels, y_pred, ce, 1.5, 3.0)
 
     # Double Soft F1 Loss
     tp = jnp.sum(labels * y_pred, axis=0)
@@ -213,7 +220,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # Cross-entropy weighted with focal loss and weight decay
-    return 0.05 * f_loss + 0.9 * f1_cost + 1e-12 * l2_loss, state
+    return 0.7 * f_loss + 0.1 * ce_loss + 0.3 * f1_cost + 1e-14 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
