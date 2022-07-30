@@ -150,12 +150,12 @@ def process_epoch_gen(a, b, batch_size, patch_size):
     return epoch_generator
 
 
-batch_size = 1
-patch_size = 12
+batch_size = 7
+patch_size = 10
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
-patch_dim = 72 // patch_size
+patch_dim = 60 // patch_size
 
 
 # def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
@@ -226,7 +226,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 1e-3
+learning_rate = 1e-4
 grad_clip_value = 1.0
 #scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -283,7 +283,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 8
+num_epochs = 6
 
 upd_fn = jax.jit(updater.update)
 
