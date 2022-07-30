@@ -202,10 +202,10 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f_loss = jnp.mean(f_loss)
 
     # Double Soft F1 Loss
-    tp = jnp.sum(y * y_pred, axis=0)
-    fp = jnp.sum((1 - y) * y_pred, axis=0)
-    fn = jnp.sum(y * (1 - y_pred), axis=0)
-    tn = jnp.sum((1 - y) * (1 - y_pred), axis=0)
+    tp = jnp.sum(labels * y_pred, axis=0)
+    fp = jnp.sum((1 - labels) * y_pred, axis=0)
+    fn = jnp.sum(labels * (1 - y_pred), axis=0)
+    tn = jnp.sum((1 - labels) * (1 - y_pred), axis=0)
     soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
     soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
     cost1 = 1 - soft_f11
@@ -213,7 +213,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # Cross-entropy weighted with focal loss and weight decay
-    return f_loss + f1_cost + 1e-8 * l2_loss, state
+    return 0.05 * f_loss + 0.9 * f1_cost + 1e-12 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
