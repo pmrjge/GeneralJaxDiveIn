@@ -163,8 +163,8 @@ def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
     return epoch_generator
 
 
-batch_size = 12
-patch_size = 12
+batch_size = 20
+patch_size = 9
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.device_count())
 
@@ -172,8 +172,8 @@ patch_dim = 72 // patch_size
 
 
 # def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=128, num_heads=16,
-                     transformer_units_1=768, transformer_units_2=512, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=16, num_heads=8,
+                     transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(512, 256), dropout=0.4):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -222,12 +222,11 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
 
     y_pred = jnp.exp(logits)
     # CE loss
-    ce_loss = jnp.sum(ce, axis=1)
-    ce_loss = jnp.mean(ce_loss, axis=0)
+    #ce_loss = jnp.sum(ce, axis=1)
+    #ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Focal Loss
-    f_loss = focal_loss(labels, y_pred, ce, 2.0,
-                        4.0)  # + focal_loss(labels, y_pred, ce, 3., 4.0) + focal_loss(labels, y_pred, ce, 4.0, 4.0)
+    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0)  # + focal_loss(labels, y_pred, ce, 3., 4.0) + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
     tp = jnp.sum(labels * y_pred, axis=0)
@@ -241,12 +240,12 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return f_loss + ce_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
+    return f_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 3e-5
+learning_rate = 5e-5
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -304,7 +303,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, b)
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 6
+num_epochs = 4
 
 upd_fn = updater.update
 
@@ -341,8 +340,8 @@ for i in range(num_epochs):
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
 print("Starting evaluation loop........................")
-params = jax.device_get(params)
-state = jax.device_get(state)
+params = jax.device_get(jax.tree_util.tree_map(lambda g: g[0], params))
+state = jax.device_get(jax.tree_util.tree_map(lambda g: g[0], state))
 
 res = np.zeros(xt.shape[0], dtype=np.int64)
 
