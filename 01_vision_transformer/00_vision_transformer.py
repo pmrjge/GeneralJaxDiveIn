@@ -150,15 +150,16 @@ def process_epoch_gen(a, b, batch_size, patch_size):
     return epoch_generator
 
 
-batch_size = 14
+batch_size = 1
 patch_size = 12
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
 
-patch_dim = 144 // patch_size
+patch_dim = 72 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=32, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+# def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=128, num_heads=16, transformer_units_1=768, transformer_units_2=512, mlp_head_units=(2048, 1024), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -181,8 +182,8 @@ rng = jr.PRNGKey(0)
 def focal_loss(labels, y_pred, ce, gamma, alpha):
     weight = labels * jnp.power(1 - y_pred, gamma)
     f_loss = alpha * (weight * ce)
-    f_loss = jnp.sum(f_loss, axis=1)
-    f_loss = jnp.mean(f_loss, axis=0)
+    #f_loss = jnp.sum(f_loss, axis=1)
+    f_loss = jnp.mean(f_loss)
     return f_loss
 
 
@@ -220,12 +221,12 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return f_loss + f1_cost + 1e-12 * (l2_loss + l1_loss), state
+    return f_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 1e-4
+learning_rate = 1e-3
 grad_clip_value = 1.0
 #scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -282,7 +283,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 
 # Training loop
 print("Starting training loop..........................")
-num_epochs = 3
+num_epochs = 8
 
 upd_fn = jax.jit(updater.update)
 
@@ -290,7 +291,7 @@ for i in range(num_epochs):
     rng1, rng2, rng = jr.split(rng, 3)
     for step, (bx, by) in tqdm(enumerate(process_gen(rng1)), total=42000 // batch_size):
         num_steps, rng2, params, state, opt_state, metrics = upd_fn(num_steps, rng2, params, state, opt_state, bx, by)
-        if (step + 1) % 28 == 0:
+        if (step + 1) % 8 == 0:
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
 print("Starting evaluation loop........................")
