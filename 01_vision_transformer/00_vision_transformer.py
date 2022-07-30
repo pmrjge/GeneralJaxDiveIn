@@ -22,6 +22,9 @@ import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 
+from jax.experimental.pjit import pjit, PartitionSpec
+from jax.experimental.maps import Mesh
+
 try:
     # Disable all GPUS
     tf.config.set_visible_devices([], 'GPU')
@@ -32,6 +35,7 @@ try:
 except:
     # Invalid device or cannot modify virtual devices once initialized.
     print("Cannot change virtual devices")
+
 
 class PreProcessPatches:
     def __init__(self, patch_size):
@@ -63,7 +67,8 @@ class PatchEncoder(hk.Module):
         w_init = hki.VarianceScaling()
         b_init = hki.Constant(0)
         return hk.Linear(output_size=self.projection_dim, w_init=w_init, b_init=b_init, name="projection")(patch) + \
-            hk.Embed(vocab_size=self.num_patches, embed_dim=self.projection_dim, w_init=w_init, name="position_embed")(self.positions)
+               hk.Embed(vocab_size=self.num_patches, embed_dim=self.projection_dim, w_init=w_init,
+                        name="position_embed")(self.positions)
 
 
 class MLP(hk.Module):
@@ -84,7 +89,8 @@ class MLP(hk.Module):
 
 
 class ViT(hk.Module):
-    def __init__(self, num_patches=12*12, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
+    def __init__(self, num_patches=12 * 12, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048,
+                 transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
         super(ViT, self).__init__()
         self.num_patches = num_patches
         self.projection_dim = projection_dim
@@ -94,7 +100,8 @@ class ViT(hk.Module):
         self.transformer_units_2 = transformer_units_2
         self.mlp_head_units = mlp_head_units
         self.dropout = dropout
-        self.norm = lambda: hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, eps=1e-6, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))
+        self.norm = lambda: hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, eps=1e-6,
+                                         scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))
 
     def __call__(self, patches, *, is_training: bool):
         dropout = self.dropout if is_training else 0.0
@@ -104,7 +111,9 @@ class ViT(hk.Module):
         w_init = hki.VarianceScaling()
         for _ in range(self.num_blocks):
             x1 = self.norm()(encoded_patches)
-            attention = hk.MultiHeadAttention(self.num_heads, self.projection_dim // self.num_heads, w_init=w_init)(x1, x1, x1)
+            attention = hk.MultiHeadAttention(self.num_heads, self.projection_dim // self.num_heads, w_init=w_init)(x1,
+                                                                                                                    x1,
+                                                                                                                    x1)
             x2 = attention + encoded_patches
             x3 = self.norm()(x2)
             x3 = MLP((self.transformer_units_1, self.transformer_units_2), self.dropout)(x3, is_training=is_training)
@@ -132,7 +141,6 @@ xt = data['test']
 
 
 def process_epoch_gen(a, b, batch_size, patch_size):
-
     proc = PreProcessPatches(patch_size=patch_size)
 
     def epoch_generator(rng):
@@ -143,14 +151,14 @@ def process_epoch_gen(a, b, batch_size, patch_size):
         perm = jr.permutation(key, n)
         for i in range(num_batches):
             i0 = i * batch_size
-            i1 = (i+1) * batch_size
+            i1 = (i + 1) * batch_size
             subp = perm[i0: i1]
             yield proc(a[subp]), jnp.array(b[subp], dtype=jnp.int32)
 
     return epoch_generator
 
 
-batch_size = 7
+batch_size = 6
 patch_size = 10
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size)
@@ -159,7 +167,8 @@ patch_dim = 60 // patch_size
 
 
 # def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=128, num_heads=16, transformer_units_1=768, transformer_units_2=512, mlp_head_units=(2048, 1024), dropout=0.5):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=128, num_heads=16,
+                     transformer_units_1=768, transformer_units_2=512, mlp_head_units=(2048, 1024), dropout=0.5):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -174,6 +183,15 @@ ffn = build_forward_fn()
 ffn = hk.transform_with_state(ffn)
 
 apply = ffn.apply
+
+# fast_apply = jax.jit(apply, static_argnames=('is_training',))
+
+in_axis_resources = None
+out_axis_resources = PartitionSpec('devices')
+
+l_apply = ft.partial(apply, is_training=True)
+l_apply = jax.jit(l_apply)
+loss_apply = pjit(l_apply, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources)
 fast_apply = jax.jit(apply, static_argnames=('is_training',))
 
 rng = jr.PRNGKey(0)
@@ -182,23 +200,25 @@ rng = jr.PRNGKey(0)
 def focal_loss(labels, y_pred, ce, gamma, alpha):
     weight = labels * jnp.power(1 - y_pred, gamma)
     f_loss = alpha * (weight * ce)
-    #f_loss = jnp.sum(f_loss, axis=1)
-    f_loss = jnp.mean(f_loss)
+    f_loss = jnp.sum(f_loss, axis=1)
+    f_loss = jnp.mean(f_loss, axis=0)
     return f_loss
 
 
-@ft.partial(jax.jit, static_argnums=(0, 6, 7,))
-def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, num_classes: int = 10):
-    logits, state = forward_fn(params, state, rng, a, is_training=is_training)
+# @ft.partial(jax.jit, static_argnums=(0, 6))
+def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
+    with Mesh(np.array(jax.devices()), ('devices',)):
+        logits, state = forward_fn(params, state, rng, a)
 
     labels = jnn.one_hot(b, num_classes=num_classes)
 
     # Weight decay
-    l2_loss = 0.5 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+    l2_loss = 0.5 * jnp.sum(
+        jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     l1_loss = jnp.sum(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
     # Normalized CE loss and Focal loss so it is more smooth and gives back better feedback
-    #logits = jnp.clip(logits, a_min=jnp.log(1e-12), a_max=jnp.log(1 - 1e-12))
+    # logits = jnp.clip(logits, a_min=jnp.log(1e-12), a_max=jnp.log(1 - 1e-12))
     ce = -labels * logits
 
     y_pred = jnp.exp(logits)
@@ -207,7 +227,8 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Focal Loss
-    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) #+ focal_loss(labels, y_pred, ce, 3., 4.0) + focal_loss(labels, y_pred, ce, 4.0, 4.0)
+    f_loss = focal_loss(labels, y_pred, ce, 2.0,
+                        4.0)  # + focal_loss(labels, y_pred, ce, 3., 4.0) + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
     tp = jnp.sum(labels * y_pred, axis=0)
@@ -221,22 +242,22 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return f_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
+    return f_loss + ce_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
 
 
-loss_fn = ft.partial(ce_loss_fn, fast_apply)
+loss_fn = ft.partial(ce_loss_fn, loss_apply)
 
 learning_rate = 1e-4
 grad_clip_value = 1.0
-#scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
+# scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
-    #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
-    #optax.scale_by_radam(b1=0.9, eps=1e-8),
+    # optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
+    # optax.scale_by_radam(b1=0.9, eps=1e-8),
     optax.scale_by_adam(b1=0.9, eps=1e-4),
-    #optax.scale_by_yogi(),
-    #optax.scale_by_schedule(scheduler),
+    # optax.scale_by_yogi(),
+    # optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
 )
 
@@ -285,7 +306,7 @@ num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
 print("Starting training loop..........................")
 num_epochs = 6
 
-upd_fn = jax.jit(updater.update)
+upd_fn = updater.update
 
 for i in range(num_epochs):
     rng1, rng2, rng = jr.split(rng, 3)
@@ -305,11 +326,11 @@ proc = PreProcessPatches(patch_size=patch_size)
 
 for j in tqdm(range(count)):
     rng, = jr.split(rng, 1)
-    a, b = j * bts, (j+1) * bts
+    a, b = j * bts, (j + 1) * bts
     pbt = proc(xt[a:b, :, :, :])
     logits, _ = fast_apply(params, state, rng, pbt, is_training=False)
     res[a:b] = np.array(jnp.argmax(jnp.exp(logits), axis=1), dtype=np.int64)
 
-df = pd.DataFrame({'ImageId': np.arange(1, xt.shape[0]+1, dtype=np.int64), 'Label': res})
+df = pd.DataFrame({'ImageId': np.arange(1, xt.shape[0] + 1, dtype=np.int64), 'Label': res})
 
 df.to_csv('../data/digits/results.csv', index=False)
