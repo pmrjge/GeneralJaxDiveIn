@@ -22,7 +22,8 @@ import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 
-from jax.experimental.pjit import pjit, PartitionSpec
+from jax.experimental import PartitionSpec
+from jax.experimental.pjit import pjit
 from jax.experimental.maps import Mesh
 
 try:
@@ -140,8 +141,10 @@ y = data['labels']
 xt = data['test']
 
 
-def process_epoch_gen(a, b, batch_size, patch_size):
+def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
     proc = PreProcessPatches(patch_size=patch_size)
+
+    topo = batch_size // num_devices
 
     def epoch_generator(rng):
         n = a.shape[0]
@@ -153,17 +156,19 @@ def process_epoch_gen(a, b, batch_size, patch_size):
             i0 = i * batch_size
             i1 = (i + 1) * batch_size
             subp = perm[i0: i1]
-            yield proc(a[subp]), jnp.array(b[subp], dtype=jnp.int32)
+            outx = jnp.array(proc(a[subp]), dtype=jnp.float32)
+            outy = jnp.array(b[subp], dtype=jnp.int32)
+            yield outx.reshape(num_devices, topo, *outx.shape[1:]), outy.reshape(num_devices, topo, *outy.shape[1:])
 
     return epoch_generator
 
 
-batch_size = 6
-patch_size = 10
+batch_size = 12
+patch_size = 12
 
-process_gen = process_epoch_gen(x, y, batch_size, patch_size)
+process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.device_count())
 
-patch_dim = 60 // patch_size
+patch_dim = 72 // patch_size
 
 
 # def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
@@ -184,14 +189,8 @@ ffn = hk.transform_with_state(ffn)
 
 apply = ffn.apply
 
-# fast_apply = jax.jit(apply, static_argnames=('is_training',))
-
-in_axis_resources = None
-out_axis_resources = PartitionSpec('devices')
-
 l_apply = ft.partial(apply, is_training=True)
 l_apply = jax.jit(l_apply)
-loss_apply = pjit(l_apply, in_axis_resources=in_axis_resources, out_axis_resources=out_axis_resources)
 fast_apply = jax.jit(apply, static_argnames=('is_training',))
 
 rng = jr.PRNGKey(0)
@@ -245,9 +244,9 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     return f_loss + ce_loss + f1_cost + 1e-14 * (l2_loss + l1_loss), state
 
 
-loss_fn = ft.partial(ce_loss_fn, loss_apply)
+loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-4
+learning_rate = 3e-5
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -279,6 +278,8 @@ class ParamsUpdater:
 
         (loss, state), grads = jax.value_and_grad(self._loss, has_aux=True)(params, state, rng, bx, by)
 
+        grads = jax.lax.psum(grads, axis_name='devices')
+
         updates, opt_state = self._opt.update(grads, opt_state, params)
 
         params = optax.apply_updates(params, updates)
@@ -298,9 +299,8 @@ rng1, rng2 = jr.split(rng)
 
 epoch_gen_temp = process_gen(rng1)
 bx, _ = next(epoch_gen_temp)
-bx = jnp.expand_dims(bx, axis=0)
-
-num_steps, rng, params, state, opt_state = updater.init(rng2, bx[0, :, :])
+b = jnp.expand_dims(bx[0, 0, :, :], axis=0)
+num_steps, rng, params, state, opt_state = updater.init(rng2, b)
 
 # Training loop
 print("Starting training loop..........................")
@@ -308,14 +308,41 @@ num_epochs = 6
 
 upd_fn = updater.update
 
+batch_update = jax.pmap(upd_fn, axis_name='devices', in_axes=0, out_axes=0)
+
+params = jax.device_put_replicated(params, devices=jax.devices())
+state = jax.device_put_replicated(state, devices=jax.devices())
+opt_state = jax.device_put_replicated(opt_state, devices=jax.devices())
+num_steps = jax.device_put_replicated(num_steps, devices=jax.devices())
+
+
+def replicate_tree(t, num_devices):
+    return jax.tree_util.tree_map(lambda x: jnp.array([x] * num_devices), t)
+
+
+n_devices = len(jax.local_devices())
+
 for i in range(num_epochs):
     rng1, rng2, rng = jr.split(rng, 3)
+    rng2 = jax.device_put_replicated(rng2, devices=jax.local_devices())
     for step, (bx, by) in tqdm(enumerate(process_gen(rng1)), total=42000 // batch_size):
-        num_steps, rng2, params, state, opt_state, metrics = upd_fn(num_steps, rng2, params, state, opt_state, bx, by)
+
+        bbx = []
+        bby = []
+        for k in range(n_devices):
+            bbx.append(bx[k])
+            bby.append(by[k])
+
+        dbx = jax.device_put_sharded(bbx, devices=jax.local_devices())
+        dby = jax.device_put_sharded(bby, devices=jax.local_devices())
+
+        num_steps, rng2, params, state, opt_state, metrics = batch_update(num_steps, rng2, params, state, opt_state, dbx, dby)
         if (step + 1) % 8 == 0:
             print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
 
 print("Starting evaluation loop........................")
+params = jax.device_get(params)
+state = jax.device_get(state)
 
 res = np.zeros(xt.shape[0], dtype=np.int64)
 

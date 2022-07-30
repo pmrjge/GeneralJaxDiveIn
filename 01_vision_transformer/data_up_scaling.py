@@ -22,7 +22,7 @@ def load_dataset(filename='../data/digits/train.csv', filename1='../data/digits/
     return train_x, train_y, test_x
 
 
-upscale = 60
+upscale = 72
 
 train_x, train_y, test_x = load_dataset()
 
