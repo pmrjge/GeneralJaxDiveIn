@@ -22,7 +22,7 @@ def load_dataset(filename='../data/digits/train.csv', filename1='../data/digits/
     return train_x, train_y, test_x
 
 
-upscale = 96
+upscale = 144
 
 train_x, train_y, test_x = load_dataset()
 
@@ -47,7 +47,7 @@ plt.show()
 
 data_dict = {"train": train_res, "labels": train_y, "test": test_res}
 
-with open('../data/digits/data1.dict', 'wb') as f:
+with open('../data/digits/data2.dict', 'wb') as f:
     pickle.dump(data_dict, f)
 
 
