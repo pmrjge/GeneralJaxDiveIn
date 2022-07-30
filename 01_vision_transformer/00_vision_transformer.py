@@ -205,8 +205,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Focal Loss
-    f_loss = focal_loss(labels, y_pred, ce, 0.5, 4.0) + focal_loss(labels, y_pred, ce, 2.0, 4.0) + focal_loss(labels, y_pred, ce, 3.5, 2.0) + \
-        focal_loss(labels, y_pred, ce, 1.2, 1.0) + focal_loss(labels, y_pred, ce, 1.5, 3.0)
+    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) + focal_loss(labels, y_pred, ce, 3., 4.0) + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
     tp = jnp.sum(labels * y_pred, axis=0)
@@ -220,13 +219,13 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     f1_cost = jnp.mean(0.5 * (cost1 + cost0))
 
     # Cross-entropy weighted with focal loss and weight decay
-    return 0.7 * f_loss + 0.1 * ce_loss + 0.3 * f1_cost + 1e-14 * l2_loss, state
+    return 0.5 * f_loss + 0.01 * ce_loss + f1_cost + 1e-18 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
 
-learning_rate = 1e-4
-grad_clip_value = 1.0
+learning_rate = 1e-3
+grad_clip_value = 0.1
 #scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
