@@ -188,21 +188,32 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
     # Normalized CE loss and Focal loss so it is more smooth and gives back better feedback
-    logits = jnp.clip(logits, a_min=jnp.log(1e-10), a_max=jnp.log(1 - 1e-10))
+    #logits = jnp.clip(logits, a_min=jnp.log(1e-12), a_max=jnp.log(1 - 1e-12))
     ce = -labels * logits
 
+    y_pred = jnp.exp(logits)
     # CE loss
-    ce_loss = jnp.mean(ce)
+    #ce_loss = jnp.mean(ce)
 
     # Focal Loss
-    y_pred = jnp.exp(logits)
     weight = labels * jnp.power(1 - y_pred, gamma)
     f_loss = alpha * (weight * ce)
-    #f_loss = jnp.max(f_loss, axis=1)
+    # f_loss = jnp.max(f_loss, axis=1)
     f_loss = jnp.mean(f_loss)
 
+    # Double Soft F1 Loss
+    tp = jnp.sum(y * y_pred, axis=0)
+    fp = jnp.sum((1 - y) * y_pred, axis=0)
+    fn = jnp.sum(y * (1 - y_pred), axis=0)
+    tn = jnp.sum((1 - y) * (1 - y_pred), axis=0)
+    soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
+    soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
+    cost1 = 1 - soft_f11
+    cost0 = 1 - soft_f10
+    f1_cost = jnp.mean(0.5 * (cost1 + cost0))
+
     # Cross-entropy weighted with focal loss and weight decay
-    return ce_loss + f_loss + 1e-8 * l2_loss, state
+    return f_loss + f1_cost + 1e-8 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
