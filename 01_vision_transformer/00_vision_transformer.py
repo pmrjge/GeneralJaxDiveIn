@@ -187,22 +187,22 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, is_training: bool = True, n
     # Weight decay
     l2_loss = 0.1 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
-    logits = jnp.clip(logits, a_min=jnp.log(1e-9), a_max=jnp.log(1 - 1e-9))
+    # Normalized CE loss and Focal loss so it is more smooth and gives back better feedback
+    logits = jnp.clip(logits, a_min=jnp.log(1e-10), a_max=jnp.log(1 - 1e-10))
     ce = -labels * logits
 
-    # Cross entropy loss
-    loss = jnp.sum(ce, axis=1)
-    loss = jnp.mean(loss)
+    # CE loss
+    ce_loss = jnp.mean(ce)
 
     # Focal Loss
     y_pred = jnp.exp(logits)
     weight = labels * jnp.power(1 - y_pred, gamma)
     f_loss = alpha * (weight * ce)
-    f_loss = jnp.sum(f_loss, axis=1)
+    #f_loss = jnp.max(f_loss, axis=1)
     f_loss = jnp.mean(f_loss)
 
     # Cross-entropy weighted with focal loss and weight decay
-    return 0.1 * loss + f_loss + 1e-8 * l2_loss, state
+    return ce_loss + f_loss + 1e-8 * l2_loss, state
 
 
 loss_fn = ft.partial(ce_loss_fn, fast_apply)
@@ -214,8 +214,8 @@ grad_clip_value = 1.0
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     #optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
-    #optax.scale_by_radam(),
-    optax.scale_by_adam(b1=0.9, eps=1e-6),
+    #optax.scale_by_radam(b1=0.9, eps=1e-8),
+    optax.scale_by_adam(b1=0.9, eps=1e-4),
     #optax.scale_by_yogi(),
     #optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
