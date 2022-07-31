@@ -164,16 +164,16 @@ def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
 
 
 batch_size = 8
-patch_size = 12
+patch_size = 10
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.device_count())
 
-patch_dim = 72 // patch_size
+patch_dim = 80 // patch_size
 
 
 # def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
 def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8,
-                     transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(512, 256), dropout=0.4):
+                     transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.4):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -228,23 +228,26 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) # + focal_loss(labels, y_pred, ce, 3.0, 4.0) # + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
-    # tp = jnp.sum(labels * y_pred, axis=0)
-    # fp = jnp.sum((1 - labels) * y_pred, axis=0)
-    # fn = jnp.sum(labels * (1 - y_pred), axis=0)
-    # tn = jnp.sum((1 - labels) * (1 - y_pred), axis=0)
-    # soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
-    # soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
-    # cost1 = 1 - soft_f11
-    # cost0 = 1 - soft_f10
-    # f1_cost = jnp.mean(0.5 * (cost1 + cost0))
+    tp = jnp.sum(labels * y_pred, axis=0)
+    fp = jnp.sum((1 - labels) * y_pred, axis=0)
+    fn = jnp.sum(labels * (1 - y_pred), axis=0)
+    tn = jnp.sum((1 - labels) * (1 - y_pred), axis=0)
+    soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
+    soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
+    cost1 = 1 - soft_f11
+    cost0 = 1 - soft_f10
+    f1_cost = jnp.mean(0.5 * (cost1 + cost0))
+
+    # cosine similarity
+
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return f_loss + 1e-13 * (l2_loss + l1_loss), state
+    return jnp.log(0.5 * f1_cost + 0.5 * f_loss + 1.0 + 1e-16) + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-6
+learning_rate = 1e-4
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
