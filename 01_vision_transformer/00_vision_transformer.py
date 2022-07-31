@@ -242,19 +242,19 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
 
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return 0.5 * f_loss + 0.5 * jnp.log(f1_loss + 1.0 + 1e-16) + 1e-14 * (l2_loss + l1_loss), state
+    return jnp.log(0.5 * f_loss + 0.5 * f1_loss + 1.0 + 1e-16) + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-2
+learning_rate = 1e-4
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     # optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
-    optax.scale_by_radam(b1=0.9, eps=1e-2),
+    optax.scale_by_radam(b1=0.9, eps=1e-4),
     #optax.scale_by_adam(b1=0.9, eps=1e-6),
     # optax.scale_by_yogi(),
     # optax.scale_by_schedule(scheduler),
