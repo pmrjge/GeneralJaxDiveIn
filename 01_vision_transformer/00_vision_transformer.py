@@ -225,7 +225,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     #ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Focal Loss
-    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) + focal_loss(labels, y_pred, ce, 3.0, 4.0) # + focal_loss(labels, y_pred, ce, 4.0, 4.0)
+    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) # + focal_loss(labels, y_pred, ce, 3.0, 4.0) # + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
     # tp = jnp.sum(labels * y_pred, axis=0)
