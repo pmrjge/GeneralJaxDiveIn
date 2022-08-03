@@ -19,55 +19,16 @@ import haiku as hk
 import haiku.initializers as hki
 import pandas as pd
 
-import tensorflow as tf
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 
-try:
-    # Disable all GPUS
-    tf.config.set_visible_devices([], 'GPU')
-    visible_devices = tf.config.get_visible_devices()
-    print(visible_devices)
-    for device in visible_devices:
-        assert device.device_type != 'GPU'
-except:
-    # Invalid device or cannot modify virtual devices once initialized.
-    print("Cannot change virtual devices")
+def img_to_patch(x, patch_size):
+    b, h, w, c = x.shape
 
-
-class PreProcessPatches:
-    def __init__(self, patch_size):
-        self.patch_size = patch_size
-
-    def __call__(self, images):
-        with tf.device('/CPU:0'):
-            batch_size = images.shape[0]
-            patches = tf.image.extract_patches(
-                images=images,
-                sizes=[1, self.patch_size, self.patch_size, 1],
-                strides=[1, self.patch_size, self.patch_size, 1],
-                rates=[1, 1, 1, 1],
-                padding="VALID"
-            )
-            patch_dims = patches.shape[-1]
-            patches = tf.reshape(patches, [batch_size, -1, patch_dims])
-        return jnp.array(patches.numpy(), dtype=jnp.float32)
-
-
-class PatchEncoder(hk.Module):
-    def __init__(self, num_patches, projection_dim=1024):
-        super(PatchEncoder, self).__init__()
-        self.num_patches = num_patches
-        self.projection_dim = projection_dim
-        self.positions = jnp.arange(0, self.num_patches, step=1)
-
-    def __call__(self, patch):
-        w_init = hki.VarianceScaling()
-        b_init = hki.Constant(0)
-        return hk.Linear(output_size=self.projection_dim, w_init=w_init, b_init=b_init, name="projection")(patch) + \
-               hk.Embed(vocab_size=self.num_patches, embed_dim=self.projection_dim, w_init=w_init,
-                        name="position_embed")(self.positions)
-
+    x = np.reshape(x, (b, h // patch_size, patch_size, w // patch_size, patch_size, c))
+    x = np.transpose(x, (0, 1, 3, 2, 4, 5))
+    x = np.reshape(x, (b, -1, *x.shape[3:]))
+    return x
 
 class MLP(hk.Module):
     def __init__(self, hidden_units, dropout):
@@ -86,11 +47,52 @@ class MLP(hk.Module):
         return x
 
 
+class ConvolutionalBase(hk.Module):
+
+    def __init__(self, dropout):
+        self.dropout = dropout
+        super().__init__()
+
+    def __call__(self, inputs, is_training=False):
+        dropout = self.dropout if is_training else 0.0
+        lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
+
+        x = hk.Conv3D(output_channels=32, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init, b_init=hki.RandomNormal(stddev=1e-6))(inputs)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        x = hk.Conv3D(output_channels=64, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        x = hk.Conv3D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        x = hk.Conv3D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = jnn.gelu(x, approximate=False)
+        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+
+        x = einops.rearrange(x, 'b c h t f -> b c (h t f)')
+
+        x = hk.Linear(256)(x)
+        x = jnn.gelu(x)
+        x = hk.Linear(64)(x)
+        x = jnn.gelu(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+
+        return x
+
+
 class ViT(hk.Module):
-    def __init__(self, num_patches=12 * 12, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048,
+    def __init__(self, num_patches=12 * 12, patch_size=8, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048,
                  transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
         super(ViT, self).__init__()
         self.num_patches = num_patches
+        self.patch_size = patch_size
         self.projection_dim = projection_dim
         self.num_blocks = num_blocks
         self.num_heads = num_heads
@@ -101,10 +103,18 @@ class ViT(hk.Module):
         self.norm = lambda: hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, eps=1e-6,
                                          scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))
 
-    def __call__(self, patches, *, is_training: bool):
+    def __call__(self, x, *, is_training: bool):
         dropout = self.dropout if is_training else 0.0
 
-        encoded_patches = PatchEncoder(self.num_patches, self.projection_dim)(patches)
+        patches = img_to_patch(x, self.patch_size)
+
+        b, t, _, _, _ = patches.shape
+
+        patches = ConvolutionalBase(self.dropout)(patches, is_training=is_training)
+
+        cls_token = hk.get_parameter('cls_token', (1, 1, self.projection_dim), init=hki.RandomNormal(stddev=1.0)).repeat(b, axis=0)
+        encoded_patches = jnp.concatenate([cls_token, patches], axis=1)
+        encoded_patches = encoded_patches + hk.get_parameter('pos_embedding', (1, 1 + self.num_patches, self.projection_dim), init=hki.RandomNormal(stddev=1.0))[:, :(t+1)]
 
         w_init = hki.VarianceScaling()
         for _ in range(self.num_blocks):
@@ -139,7 +149,6 @@ xt = data['test']
 
 
 def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
-    proc = PreProcessPatches(patch_size=patch_size)
 
     topo = batch_size // num_devices
 
@@ -153,14 +162,14 @@ def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
             i0 = i * batch_size
             i1 = (i + 1) * batch_size
             subp = perm[i0: i1]
-            outx = jnp.array(proc(a[subp]), dtype=jnp.float32)
+            outx = jnp.array(a[subp], dtype=jnp.float32)
             outy = jnp.array(b[subp], dtype=jnp.int32)
             yield outx.reshape(num_devices, topo, *outx.shape[1:]), outy.reshape(num_devices, topo, *outy.shape[1:])
 
     return epoch_generator
 
 
-batch_size = 8
+batch_size = 6
 patch_size = 8
 
 process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.local_device_count())
@@ -168,10 +177,10 @@ process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.local_device_c
 patch_dim = 80 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=64, num_heads=16,
+def build_forward_fn(num_patches=patch_dim * patch_dim, patch_size=patch_size, projection_dim=512, num_blocks=64, num_heads=16,
                      transformer_units_1=2048, transformer_units_2=512, mlp_head_units=(2048, 512), dropout=0.4):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
-        return ViT(num_patches=num_patches, projection_dim=projection_dim,
+        return ViT(num_patches=num_patches, patch_size=patch_size, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
                    transformer_units_2=transformer_units_2, mlp_head_units=mlp_head_units,
                    dropout=dropout)(dgt, is_training=is_training)
@@ -243,7 +252,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 5e-5
+learning_rate = 1e-3
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
@@ -351,12 +360,10 @@ res = np.zeros(xt.shape[0], dtype=np.int64)
 btchs = 10
 count = xt.shape[0] // btchs
 
-proc = PreProcessPatches(patch_size=patch_size)
-
 for j in tqdm(range(count)):
     rng, = jr.split(rng, 1)
     a, b = j * btchs, (j + 1) * btchs
-    pbt = proc(xt[a:b, :, :, :])
+    pbt = xt[a:b, :, :, :]
     logits, _ = fast_apply(params, state, rng, pbt, is_training=False)
     res[a:b] = np.array(jnp.argmax(jnp.exp(logits), axis=1), dtype=np.int64)
 
