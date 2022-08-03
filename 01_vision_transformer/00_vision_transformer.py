@@ -22,9 +22,6 @@ import pandas as pd
 import tensorflow as tf
 from tqdm import tqdm
 
-from jax.experimental import PartitionSpec
-from jax.experimental.pjit import pjit
-from jax.experimental.maps import Mesh
 
 try:
     # Disable all GPUS
@@ -163,17 +160,16 @@ def process_epoch_gen(a, b, batch_size, patch_size, num_devices):
     return epoch_generator
 
 
-batch_size = 6
-patch_size = 10
+batch_size = 8
+patch_size = 8
 
-process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.device_count())
+process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.local_device_count())
 
 patch_dim = 80 // patch_size
 
 
-# def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8, transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.5):
-def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num_blocks=64, num_heads=8,
-                     transformer_units_1=2048, transformer_units_2=1024, mlp_head_units=(2048, 1024), dropout=0.4):
+def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=512, num_blocks=64, num_heads=16,
+                     transformer_units_1=2048, transformer_units_2=512, mlp_head_units=(2048, 512), dropout=0.4):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, projection_dim=projection_dim,
                    num_blocks=num_blocks, num_heads=num_heads, transformer_units_1=transformer_units_1,
@@ -184,6 +180,8 @@ def build_forward_fn(num_patches=patch_dim * patch_dim, projection_dim=1024, num
 
 
 ffn = build_forward_fn()
+
+ffn_stats = hk.transform(ft.partial(ffn, is_training=False))
 
 ffn = hk.transform_with_state(ffn)
 
@@ -204,58 +202,56 @@ def focal_loss(labels, y_pred, ce, gamma, alpha):
     return f_loss
 
 
-# @ft.partial(jax.jit, static_argnums=(0, 6))
+@ft.partial(jax.jit, static_argnums=(0, 6))
 def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
-    with Mesh(np.array(jax.devices()), ('devices',)):
-        logits, state = forward_fn(params, state, rng, a)
+    logits, state = forward_fn(params, state, rng, a)
 
     labels = jnn.one_hot(b, num_classes=num_classes)
+    labels = optax.smooth_labels(labels, 2e-2)
 
     # Weight decay
-    l2_loss = 0.5 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
-    l1_loss = jnp.sum(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+    l2_loss = 0.5 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+    l1_loss = jnp.mean(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
     # Normalized CE loss and Focal loss so it is more smooth and gives back better feedback
     # logits = jnp.clip(logits, a_min=jnp.log(1e-12), a_max=jnp.log(1 - 1e-12))
     ce = -labels * logits
 
-    y_pred = jnp.exp(logits)
-    # CE loss
-    #ce_loss = jnp.sum(ce, axis=1)
-    #ce_loss = jnp.mean(ce_loss, axis=0)
 
+    # CE loss
+    ce_loss = jnp.sum(ce, axis=1)
+    ce_loss = jnp.mean(ce_loss, axis=0)
+
+    # y_pred = jnp.exp(logits)
     # Focal Loss
-    f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) # + focal_loss(labels, y_pred, ce, 3.0, 4.0) # + focal_loss(labels, y_pred, ce, 4.0, 4.0)
+    #f_loss = focal_loss(labels, y_pred, ce, 2.0, 4.0) # + focal_loss(labels, y_pred, ce, 3.0, 4.0) # + focal_loss(labels, y_pred, ce, 4.0, 4.0)
 
     # Double Soft F1 Loss
-    tp = jnp.sum(labels * y_pred, axis=0)
-    fp = jnp.sum((1 - labels) * y_pred, axis=0)
-    fn = jnp.sum(labels * (1 - y_pred), axis=0)
-    tn = jnp.sum((1 - labels) * (1 - y_pred), axis=0)
-    soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
-    soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
-    cost1 = 1 - soft_f11
-    cost0 = 1 - soft_f10
-    f1_loss = jnp.mean(0.5 * (cost1 + cost0))
-
-    # cosine similarity
-
+    # tp = jnp.sum(labels * y_pred, axis=0)
+    # fp = jnp.sum((1 - labels) * y_pred, axis=0)
+    # fn = jnp.sum(labels * (1 - y_pred), axis=0)
+    # tn = jnp.sum((1 - labels) * (1 - y_pred), axis=0)
+    # soft_f11 = 2 * tp / (2 * tp + fn + fp + 1e-16)
+    # soft_f10 = 2 * tn / (2 * tn + fn + fp + 1e-16)
+    # cost1 = 1 - soft_f11
+    # cost0 = 1 - soft_f10
+    # f1_loss = jnp.mean(0.5 * (cost1 + cost0))
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return jnp.log(0.5 * f_loss + 0.5 * f1_loss + 1.0 + 1e-16) + 1e-14 * (l2_loss + l1_loss), state
+    return ce_loss + 1e-10 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-4
+learning_rate = 5e-5
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
     optax.adaptive_grad_clip(grad_clip_value),
     # optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
-    optax.scale_by_radam(b1=0.9, eps=1e-4),
-    #optax.scale_by_adam(b1=0.9, eps=1e-6),
+    #optax.scale_by_radam(b1=0.9, eps=1e-4),
+    optax.scale_by_adam(),
     # optax.scale_by_yogi(),
     # optax.scale_by_schedule(scheduler),
     optax.scale(-learning_rate)
@@ -296,12 +292,17 @@ class ParamsUpdater:
 updater = ParamsUpdater(ffn.init, loss_fn, optimizer)
 
 print("Initializing parameters..........................")
-rng1, rng2 = jr.split(rng)
+rng1, rng2, rng3, rng = jr.split(rng, 4)
 
 epoch_gen_temp = process_gen(rng1)
 bx, _ = next(epoch_gen_temp)
 b = jnp.expand_dims(bx[0, 0, :, :], axis=0)
-num_steps, rng, params, state, opt_state = updater.init(rng2, b)
+
+
+num_steps, _, params, state, opt_state = updater.init(rng2, b)
+# Summarize network parameters
+print('Network Summary.......................')
+print(hk.experimental.tabulate(ffn_stats)(b))
 
 # Training loop
 print("Starting training loop..........................")
@@ -321,7 +322,7 @@ def replicate_tree(t, num_devices):
     return jax.tree_util.tree_map(lambda x: jnp.array([x] * num_devices), t)
 
 
-n_devices = len(jax.local_devices())
+n_devices = jax.local_device_count()
 
 for i in range(num_epochs):
     rng1, rng2, rng = jr.split(rng, 3)
@@ -347,14 +348,14 @@ state = jax.device_get(jax.tree_util.tree_map(lambda g: g[0], state))
 
 res = np.zeros(xt.shape[0], dtype=np.int64)
 
-bts = 10
-count = xt.shape[0] // bts
+btchs = 10
+count = xt.shape[0] // btchs
 
 proc = PreProcessPatches(patch_size=patch_size)
 
 for j in tqdm(range(count)):
     rng, = jr.split(rng, 1)
-    a, b = j * bts, (j + 1) * bts
+    a, b = j * btchs, (j + 1) * btchs
     pbt = proc(xt[a:b, :, :, :])
     logits, _ = fast_apply(params, state, rng, pbt, is_training=False)
     res[a:b] = np.array(jnp.argmax(jnp.exp(logits), axis=1), dtype=np.int64)
