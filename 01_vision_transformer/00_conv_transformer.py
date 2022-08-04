@@ -47,6 +47,22 @@ class MLP(hk.Module):
         return x
 
 
+class TimeDistributed(hk.Module):
+    def __init__(self, module):
+        super().__init__()
+        self.module = module
+
+    def __call__(self, x):
+
+        if len(x.shape) <= 2:
+            return self.module(x)
+
+        x_reshape = einops.rearrange(x, 'b t h w c -> (b t) h w c')
+        y = self.module(x_reshape)
+
+        return einops.rearrange(y, '(b t) h w c -> b t h w c', b=x.shape[0], t=x.shape[1])
+
+
 class ConvolutionalBase(hk.Module):
 
     def __init__(self, dropout):
@@ -57,24 +73,25 @@ class ConvolutionalBase(hk.Module):
         dropout = self.dropout if is_training else 0.0
         lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
 
-        x = hk.Conv3D(output_channels=32, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init, b_init=hki.RandomNormal(stddev=1e-6))(inputs)
+        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                               b_init=hki.RandomNormal(stddev=1e-6)))(inputs)
         x = jnn.gelu(x, approximate=False)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = hk.Conv3D(output_channels=64, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
-                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                                      b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = hk.Conv3D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
-                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                                      b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = hk.Conv3D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
-                      b_init=hki.RandomNormal(stddev=1e-6))(x)
+        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+                                      b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
-        x = hk.MaxPool(window_shape=2, strides=2, padding="SAME")(x)
+        x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
         x = einops.rearrange(x, 'b c h t f -> b c (h t f)')
 
@@ -112,10 +129,12 @@ class ViT(hk.Module):
 
         patches = ConvolutionalBase(self.dropout)(patches, is_training=is_training)
 
+        patches = hk.Linear(self.projection_dim)(patches)
         cls_token = hk.get_parameter('cls_token', (1, 1, self.projection_dim), init=hki.RandomNormal(stddev=1.0)).repeat(b, axis=0)
         encoded_patches = jnp.concatenate([cls_token, patches], axis=1)
         encoded_patches = encoded_patches + hk.get_parameter('pos_embedding', (1, 1 + self.num_patches, self.projection_dim), init=hki.RandomNormal(stddev=1.0))[:, :(t+1)]
 
+        encoded_patches = hk.dropout(hk.next_rng_key(), dropout, encoded_patches)
         w_init = hki.VarianceScaling()
         for _ in range(self.num_blocks):
             x1 = self.norm()(encoded_patches)
