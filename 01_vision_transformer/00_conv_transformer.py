@@ -83,15 +83,17 @@ class ConvolutionalBase(hk.Module):
         x = jnn.gelu(x, approximate=False)
         x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = TimeDistributed(hk.Conv2D(output_channels=64, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = TimeDistributed(hk.Conv2D(output_channels=128, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                                       b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
         x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        return einops.rearrange(x, 'b c h t f -> b c (h t f)')
+        x = einops.rearrange(x, 'b c h t f -> b c (h t f)')
 
-
-
+        x = hk.Linear(64)(x)
+        x = hk.Linear(32)(x)
+        x = hk.dropout(hk.next_rng_key(), dropout, x)
+        return x
 
 class ViT(hk.Module):
     def __init__(self, num_patches=12 * 12, patch_size=8, projection_dim=1024, num_blocks=8, num_heads=8, transformer_units_1=2048,
@@ -260,7 +262,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-3
+learning_rate = 1e-4
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
