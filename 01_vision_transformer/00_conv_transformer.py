@@ -73,35 +73,24 @@ class ConvolutionalBase(hk.Module):
         dropout = self.dropout if is_training else 0.0
         lc_init = hki.VarianceScaling(1.0, 'fan_in', 'truncated_normal')
 
-        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = TimeDistributed(hk.Conv2D(output_channels=32, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                                b_init=hki.RandomNormal(stddev=1e-6)))(inputs)
         x = jnn.gelu(x, approximate=False)
         x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = TimeDistributed(hk.Conv2D(output_channels=64, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                                       b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
         x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
+        x = TimeDistributed(hk.Conv2D(output_channels=64, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
                                       b_init=hki.RandomNormal(stddev=1e-6)))(x)
         x = jnn.gelu(x, approximate=False)
         x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
 
-        x = TimeDistributed(hk.Conv2D(output_channels=256, kernel_shape=3, stride=1, padding="SAME", w_init=lc_init,
-                                      b_init=hki.RandomNormal(stddev=1e-6)))(x)
-        x = jnn.gelu(x, approximate=False)
-        x = TimeDistributed(hk.MaxPool(window_shape=2, strides=2, padding="SAME"))(x)
+        return einops.rearrange(x, 'b c h t f -> b c (h t f)')
 
-        x = einops.rearrange(x, 'b c h t f -> b c (h t f)')
 
-        x = hk.Linear(256)(x)
-        x = jnn.gelu(x)
-        x = hk.Linear(64)(x)
-        x = jnn.gelu(x)
-        x = hk.dropout(hk.next_rng_key(), dropout, x)
-
-        return x
 
 
 class ViT(hk.Module):
@@ -196,7 +185,7 @@ process_gen = process_epoch_gen(x, y, batch_size, patch_size, jax.local_device_c
 patch_dim = 80 // patch_size
 
 
-def build_forward_fn(num_patches=patch_dim * patch_dim, patch_size=patch_size, projection_dim=512, num_blocks=64, num_heads=16,
+def build_forward_fn(num_patches=patch_dim * patch_dim, patch_size=patch_size, projection_dim=512, num_blocks=16, num_heads=16,
                      transformer_units_1=2048, transformer_units_2=512, mlp_head_units=(2048, 512), dropout=0.4):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return ViT(num_patches=num_patches, patch_size=patch_size, projection_dim=projection_dim,
@@ -266,7 +255,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     # f1_loss = jnp.mean(0.5 * (cost1 + cost0))
 
     # soft f1 score loss + focal loss and weight decay and l1 loss
-    return ce_loss + 1e-10 * (l2_loss + l1_loss), state
+    return ce_loss + 1e-12 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
@@ -276,7 +265,7 @@ grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
 optimizer = optax.chain(
-    optax.adaptive_grad_clip(grad_clip_value),
+    #optax.adaptive_grad_clip(grad_clip_value),
     # optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
     #optax.scale_by_radam(b1=0.9, eps=1e-4),
     optax.scale_by_adam(),
