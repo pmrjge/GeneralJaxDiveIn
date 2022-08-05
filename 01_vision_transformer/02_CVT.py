@@ -33,7 +33,7 @@ class SepConv2d(hk.Module):
 
     def __call__(self, x, is_training: bool):
         x = hk.Conv2D(output_channels=self.in_channels, kernel_shape=self.kernel_size, stride=self.stride, padding=self.padding, name="depthwise")(x)
-        x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9)(x, is_training)
+        x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9, scale_init=hki.TruncatedNormal(1e-6, 1.0), offset_init=hki.RandomNormal(1e-6))(x, is_training)
         return hk.Conv2D(output_channels=self.in_channels, kernel_shape=self.kernel_size, name="pointwise")(x)
 
 
@@ -80,16 +80,16 @@ class ConvAttention(hk.Module):
             cls_token = x[:, 0, :]
             x = x[:, 1:, :]
             cls_token = einops.rearrange(jnp.expand_dims(cls_token, axis=1), 'b n (h d) -> b h n d', h=h)
-        x = einops.rearrange(x, 'b (l w) n -> b n l w', l=self.img_size, w=self.img_size)
+        x = einops.rearrange(x, 'b (l w) n -> b l w n', l=self.img_size, w=self.img_size)
 
         q = SepConv2d(self.dim, self.inner_dim, kernel_size=self.kernel_size, stride=self.q_stride)(x, is_training)
-        q = einops.rearrange(q, 'b (h d) l w -> b h (l w) d', h=h)
+        q = einops.rearrange(q, 'b l w (h d)  -> b h (l w) d', h=h)
 
         v = SepConv2d(self.dim, self.inner_dim, kernel_size=self.kernel_size, stride=self.v_stride)(x, is_training)
-        v = einops.rearrange(v, 'b (h d) l w -> b h (l w) d', h=h)
+        v = einops.rearrange(v, 'b l w (h d)  -> b h (l w) d', h=h)
 
         k = SepConv2d(self.dim, self.inner_dim, kernel_size=self.kernel_size, stride=self.k_stride)(x, is_training)
-        k = einops.rearrange(k, 'b (h d) l w -> b h (l w) d', h=h)
+        k = einops.rearrange(k, 'b l w (h d) -> b h (l w) d', h=h)
 
         if self.last_stage:
             q = jnp.concatenate((cls_token, q), axis=2)
@@ -145,26 +145,26 @@ class CvTransformer(hk.Module):
     def __call__(self, img, is_training):
         #### Stage 1 ####
         xs = hk.Conv2D(self.dim, self.kernels[0], self.strides[0])(img)
-        xs = einops.rearrange(xs, 'b c h w -> b (h w) c', h=self.image_size//2, w=self.image_size//2)
+        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size//2, w=self.image_size//2)
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         xs = TransformerStage(dim=self.dim, img_size=self.image_size//2, depth=self.depth[0], heads=self.heads[0], dim_head=self.dim, mlp_dim=self.dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
-        xs = einops.rearrange(xs, 'b (h w) c -> b c h w', h=self.image_size//2, w=self.image_size//2)
+        xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size//2, w=self.image_size//2)
 
         ##### Stage 2 ####
         xs = hk.Conv2D(self.dim, self.kernels[1], self.strides[1])(xs)
-        xs = einops.rearrange(xs, 'b c h w -> b (h w) c', h=self.image_size // 4, w=self.image_size // 4)
+        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 4, w=self.image_size // 4)
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         scale = self.heads[1] // self.heads[0]
         dim = self.dim * scale
         xs = TransformerStage(dim=dim, img_size=self.image_size // 4, depth=self.depth[1], heads=self.heads[1],
                              dim_head=self.dim, mlp_dim=dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
-        xs = einops.rearrange(xs, 'b (h w) c -> b c h w', h=self.image_size // 4, w=self.image_size // 4)
+        xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size // 4, w=self.image_size // 4)
 
         ###### Stage 3 ######
         scale = self.heads[2] // self.heads[1]
         dim = scale * dim
         xs = hk.Conv2D(dim, self.kernels[2], self.strides[2])(xs)
-        xs = einops.rearrange(xs, 'b c h w -> b (h w) c', h=self.image_size // 8, w=self.image_size // 8)
+        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 8, w=self.image_size // 8)
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
 
         b, n, _ = xs.shape
@@ -178,11 +178,206 @@ class CvTransformer(hk.Module):
                               dim_head=self.dim, mlp_dim=dim * self.scale_dim,
                               dropout=self.dropout, last_stage=True)(xs, is_training)
 
-        xs = jnp.mean(xs, axis=1) if self.pool == 'mean' else xs[:, 0]
+        xs = jnp.mean(xs, axis=1) if self.pool == 'mean' else xs[:, 0, :]
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         return hk.Linear(self.num_classes)(xs)
 
 
+# Load dataset
+with open('../data/digits/data2.dict', 'rb') as f:
+    data = pickle.load(f)
+
+x = data['train']
+y = data['labels']
+xt = data['test']
 
 
+def process_epoch_gen(a, b, batch_size, num_devices):
+
+    topo = batch_size // num_devices
+
+    def epoch_generator(rng):
+        n = a.shape[0]
+        num_batches = n // batch_size
+        key, rng = jr.split(rng)
+
+        perm = jr.permutation(key, n)
+        for i in range(num_batches):
+            i0 = i * batch_size
+            i1 = (i + 1) * batch_size
+            subp = perm[i0: i1]
+            outx = jnp.array(a[subp], dtype=jnp.float32)
+            outy = jnp.array(b[subp], dtype=jnp.int32)
+            yield outx.reshape(num_devices, topo, *outx.shape[1:]), outy.reshape(num_devices, topo, *outy.shape[1:])
+
+    return epoch_generator
+
+
+batch_size = 6
+
+process_gen = process_epoch_gen(x, y, batch_size, jax.local_device_count())
+
+
+def build_forward_fn(image_size=80):
+    def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
+        return CvTransformer(image_size)(dgt, is_training=is_training)
+
+    return forward_fn
+
+
+ffn = build_forward_fn()
+
+ffn = hk.transform_with_state(ffn)
+
+apply = ffn.apply
+
+l_apply = ft.partial(apply, is_training=True)
+l_apply = jax.jit(l_apply)
+
+t_apply = ft.partial(apply, is_training=False)
+t_apply = jax.jit(t_apply)
+
+rng = jr.PRNGKey(111)
+
+
+def focal_loss(labels, y_pred, ce, gamma, alpha):
+    weight = labels * jnp.power(1 - y_pred, gamma)
+    f_loss = alpha * (weight * ce)
+    f_loss = jnp.sum(f_loss, axis=1)
+    f_loss = jnp.mean(f_loss, axis=0)
+    return f_loss
+
+
+@ft.partial(jax.jit, static_argnums=(0, 6))
+def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
+
+    logits, state = forward_fn(params, state, rng, a)
+
+    labels = jnn.one_hot(b, num_classes=num_classes)
+    labels = optax.smooth_labels(labels, 2e-2)
+
+    ce = -labels * logits
+
+    # CE loss
+    ce_loss = jnp.sum(ce, axis=1)
+    ce_loss = jnp.mean(ce_loss, axis=0)
+
+    # Weight decay
+    l2_loss = 0.1 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+    l1_loss = jnp.mean(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+
+    return ce_loss + 1e-10 * (l2_loss + l1_loss), state
+
+
+loss_fn = ft.partial(ce_loss_fn, l_apply)
+
+learning_rate = 1e-4
+grad_clip_value = 1.0
+# scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
+
+optimizer = optax.chain(
+    # optax.adaptive_grad_clip(grad_clip_value),
+    # optax.sgd(learning_rate=learning_rate, momentum=0.99, nesterov=True),
+    # optax.scale_by_radam(b1=0.9, eps=1e-4),
+    optax.scale_by_adam(),
+    # optax.scale_by_yogi(),
+    # optax.scale_by_schedule(scheduler),
+    optax.scale(-learning_rate)
+)
+
+class ParamsUpdater:
+    def __init__(self, net_init, loss, optimizer: optax.GradientTransformation):
+        self._net_init = net_init
+        self._loss = loss
+        self._opt = optimizer
+
+    def init(self, main_rng, x):
+        out_rng, init_rng = jax.random.split(main_rng)
+        params, state = self._net_init(init_rng, x, is_training=True)
+        opt_state = self._opt.init(params)
+        return jnp.array(0), out_rng, params, state, opt_state
+
+    def update(self, num_steps, rng, params, state, opt_state, bx: jnp.ndarray, by: jnp.ndarray):
+        rng, new_rng = jax.random.split(rng)
+
+        (loss, state), grads = jax.value_and_grad(self._loss, has_aux=True)(params, state, rng, bx, by)
+
+        grads = jax.lax.psum(grads, axis_name='devices')
+
+        updates, opt_state = self._opt.update(grads, opt_state, params)
+
+        params = optax.apply_updates(params, updates)
+
+        metrics = {
+            'step': num_steps,
+            'loss': loss,
+        }
+
+        return num_steps + 1, new_rng, params, state, opt_state, metrics
+
+
+updater = ParamsUpdater(ffn.init, loss_fn, optimizer)
+
+print("Initializing parameters..........................")
+rng1, rng2, rng3, rng = jr.split(rng, 4)
+
+epoch_gen_temp = process_gen(rng1)
+bx, _ = next(epoch_gen_temp)
+b = jnp.expand_dims(bx[0, 0, :, :], axis=0)
+
+
+num_steps, _, params, state, opt_state = updater.init(rng2, b)
+
+# Training loop
+print("Starting training loop..........................")
+num_epochs = 4
+
+upd_fn = updater.update
+
+batch_update = jax.pmap(upd_fn, axis_name='devices', in_axes=0, out_axes=0)
+
+params = jax.device_put_replicated(params, devices=jax.devices())
+state = jax.device_put_replicated(state, devices=jax.devices())
+opt_state = jax.device_put_replicated(opt_state, devices=jax.devices())
+num_steps = jax.device_put_replicated(num_steps, devices=jax.devices())
+
+n_devices = jax.local_device_count()
+
+for i in range(num_epochs):
+    rng1, rng2, rng = jr.split(rng, 3)
+    rng2 = jax.device_put_replicated(rng2, devices=jax.local_devices())
+    for step, (bx, by) in tqdm(enumerate(process_gen(rng1)), total=42000 // batch_size):
+
+        bbx = []
+        bby = []
+        for k in range(n_devices):
+            bbx.append(bx[k])
+            bby.append(by[k])
+
+        dbx = jax.device_put_sharded(bbx, devices=jax.local_devices())
+        dby = jax.device_put_sharded(bby, devices=jax.local_devices())
+
+        num_steps, rng2, params, state, opt_state, metrics = batch_update(num_steps, rng2, params, state, opt_state, dbx, dby)
+        if (step + 1) % 8 == 0:
+            print(f"......Epoch {i} | Step {step} | Metrics\n\n{metrics} .....................................")
+
+print("Starting evaluation loop........................")
+params = jax.device_get(jax.tree_util.tree_map(lambda g: g[0], params))
+state = jax.device_get(jax.tree_util.tree_map(lambda g: g[0], state))
+
+res = np.zeros(xt.shape[0], dtype=np.int64)
+
+btchs = 10
+count = xt.shape[0] // btchs
+
+for j in tqdm(range(count)):
+    rng, = jr.split(rng, 1)
+    a, b = j * btchs, (j + 1) * btchs
+    pbt = xt[a:b, :, :, :]
+    logits, _ = t_apply(params, state, rng, pbt)
+    res[a:b] = np.array(jnp.argmax(jnp.exp(logits), axis=1), dtype=np.int64)
+
+df = pd.DataFrame({'ImageId': np.arange(1, xt.shape[0] + 1, dtype=np.int64), 'Label': res})
+
+df.to_csv('../data/digits/results.csv', index=False)
