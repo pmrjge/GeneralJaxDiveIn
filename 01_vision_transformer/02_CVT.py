@@ -125,3 +125,33 @@ class TransformerStage(hk.Module):
             x = x + hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(FeedForward(self.dim, self.mlp_dim, self.dropout)(x, is_training))
         return x
 
+
+class CvTransformer(hk.Module):
+    def __init__(self, image_size, in_channels, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(1, 4, 16), depth=(2, 4, 20), pool='cls', dropout=0.5, emb_dropout=0.1, scale_dim=4):
+        super().__init__("transformer")
+        assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
+        self.pool = pool
+        self.dim = dim
+        self.image_size = image_size
+        self.in_channels = in_channels
+        self.num_classes = 10
+        self.kernels = kernels
+        self.strides = strides
+        self.heads = heads
+        self.depth = depth
+        self.dropout = dropout
+        self.emb_dropout = emb_dropout
+        self.scale_dim = scale_dim
+
+    def __call__(self, img, is_training):
+        #### Stage 1 ####
+        x = hk.Conv2D(self.dim, self.kernels[0], self.strides[0])(img)
+        x = einops.rearrange(x, 'b c h w -> b (h w) c', h=self.image_size//2, w=self.image_size//2)
+        x = hk.LayerNorm(-1, create_scale=True, create_offset=True)(x)
+        x = TransformerStage(dim=self.dim, img_size=self.image_size//2, depth=self.depth[0], heads=self.heads[0], dim_head=self.dim, mlp_dim=self.dim * self.scale_dim, dropout=self.dropout)(x, is_training)
+        x = einops.rearrange(x, 'b (h w) c -> b c h w', h=self.image_size//2, w=self.image_size//2)
+
+        ##### Stage 2 ####
+
+
+
