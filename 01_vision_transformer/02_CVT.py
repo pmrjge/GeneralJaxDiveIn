@@ -79,7 +79,7 @@ class ConvAttention(hk.Module):
         if self.last_stage:
             cls_token = x[:, 0, :]
             x = x[:, 1:, :]
-            cls_token = einops.rearrange(jnp.expand_dims(cls_token, axis=1), 'b n (h d) -> b h n d', h=h)
+            cls_token = einops.rearrange(jnp.expand_dims(cls_token, axis=1), 'b n (h d) -> b n d h', h=h)
         x = einops.rearrange(x, 'b (l w) n -> b l w n', l=self.img_size, w=self.img_size)
 
         q = SepConv2d(self.dim, self.inner_dim, kernel_size=self.kernel_size, stride=self.q_stride)(x, is_training)
@@ -121,8 +121,10 @@ class TransformerStage(hk.Module):
 
     def __call__(self, x, is_training: bool):
         for i in range(self.depth):
-            x = x + hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(ConvAttention(self.dim, self.img_size, heads=self.heads, dropout=self.dropout, last_stage=self.last_stage)(x, is_training))
-            x = x + hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(FeedForward(self.dim, self.mlp_dim, self.dropout)(x, is_training))
+            a = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(ConvAttention(self.dim, self.img_size, heads=self.heads, dropout=self.dropout, last_stage=self.last_stage)(x, is_training))
+            x = x + a
+            b = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(FeedForward(dim=self.dim, hidden_dim=self.mlp_dim, dropout=self.dropout)(x, is_training))
+            x = x + b
         return x
 
 
@@ -151,11 +153,11 @@ class CvTransformer(hk.Module):
         xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size//2, w=self.image_size//2)
 
         ##### Stage 2 ####
-        xs = hk.Conv2D(self.dim, self.kernels[1], self.strides[1])(xs)
-        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 4, w=self.image_size // 4)
-        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         scale = self.heads[1] // self.heads[0]
         dim = self.dim * scale
+        xs = hk.Conv2D(dim, self.kernels[1], self.strides[1])(xs)
+        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 4, w=self.image_size // 4)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         xs = TransformerStage(dim=dim, img_size=self.image_size // 4, depth=self.depth[1], heads=self.heads[1],
                              dim_head=self.dim, mlp_dim=dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
         xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size // 4, w=self.image_size // 4)
@@ -181,8 +183,8 @@ class CvTransformer(hk.Module):
         xs = jnp.mean(xs, axis=1) if self.pool == 'mean' else xs[:, 0, :]
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
-        return hk.Linear(self.num_classes)(xs)
-
+        out = hk.Linear(self.num_classes)(xs)
+        return out - logsumexp(out, axis=1)
 
 # Load dataset
 with open('../data/digits/data2.dict', 'rb') as f:
