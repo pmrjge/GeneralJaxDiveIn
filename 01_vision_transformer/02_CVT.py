@@ -129,7 +129,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(2, 4, 16), depth=(2, 4, 10), pool='cls', dropout=0.5, emb_dropout=0.1, scale_dim=2):
+    def __init__(self, image_size, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(2, 4, 8), depth=(2, 4, 18), pool='cls', dropout=0.2, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
@@ -184,7 +184,7 @@ class CvTransformer(hk.Module):
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         out = hk.Linear(self.num_classes)(xs)
-        return out - logsumexp(out, axis=1, keepdims=True)
+        return out # - logsumexp(out, axis=1, keepdims=True)
 
 # Load dataset
 with open('../data/digits/data2.dict', 'rb') as f:
@@ -216,12 +216,12 @@ def process_epoch_gen(a, b, batch_size, num_devices):
     return epoch_generator
 
 
-batch_size = 4
+batch_size = 8
 
 process_gen = process_epoch_gen(x, y, batch_size, jax.local_device_count())
 
 
-def build_forward_fn(image_size=80):
+def build_forward_fn(image_size=32):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return CvTransformer(image_size)(dgt, is_training=is_training)
 
@@ -259,22 +259,22 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     labels = jnn.one_hot(b, num_classes=num_classes)
     labels = optax.smooth_labels(labels, 2e-2)
 
-    ce = -labels * logits
-
-    # CE loss
-    ce_loss = jnp.sum(ce, axis=1)
-    ce_loss = jnp.mean(ce_loss, axis=0)
+    # ce = -labels * logits
+    #
+    # # CE loss
+    # ce_loss = jnp.sum(ce, axis=1)
+    # ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Weight decay
     l2_loss = 0.1 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     l1_loss = jnp.mean(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
-    return ce_loss + 1e-10 * (l2_loss + l1_loss), state
+    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-16 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 1e-4
+learning_rate = 3e-4
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
