@@ -79,7 +79,7 @@ class ConvAttention(hk.Module):
         if self.last_stage:
             cls_token = x[:, 0, :]
             x = x[:, 1:, :]
-            cls_token = einops.rearrange(jnp.expand_dims(cls_token, axis=1), 'b n (h d) -> b n d h', h=h)
+            cls_token = einops.rearrange(jnp.expand_dims(cls_token, axis=1), 'b n (h d) -> b h n d', h=h)
         x = einops.rearrange(x, 'b (l w) n -> b l w n', l=self.img_size, w=self.img_size)
 
         q = SepConv2d(self.dim, self.inner_dim, kernel_size=self.kernel_size, stride=self.q_stride)(x, is_training)
@@ -93,7 +93,7 @@ class ConvAttention(hk.Module):
 
         if self.last_stage:
             q = jnp.concatenate((cls_token, q), axis=2)
-            k = jnp.concatenate((cls_token, k), axis=2)
+            v = jnp.concatenate((cls_token, v), axis=2)
             k = jnp.concatenate((cls_token, k), axis=2)
 
         dots = jnp.einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
