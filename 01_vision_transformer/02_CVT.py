@@ -129,7 +129,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(1, 4, 16), depth=(2, 4, 20), pool='cls', dropout=0.5, emb_dropout=0.1, scale_dim=4):
+    def __init__(self, image_size, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(2, 4, 16), depth=(2, 4, 10), pool='cls', dropout=0.5, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
@@ -216,7 +216,7 @@ def process_epoch_gen(a, b, batch_size, num_devices):
     return epoch_generator
 
 
-batch_size = 2
+batch_size = 4
 
 process_gen = process_epoch_gen(x, y, batch_size, jax.local_device_count())
 
