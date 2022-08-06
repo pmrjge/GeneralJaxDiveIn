@@ -216,7 +216,7 @@ def process_epoch_gen(a, b, batch_size, num_devices):
     return epoch_generator
 
 
-batch_size = 6
+batch_size = 2
 
 process_gen = process_epoch_gen(x, y, batch_size, jax.local_device_count())
 
