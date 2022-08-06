@@ -131,7 +131,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=64, kernels=(3, 3, 3), strides=(2, 2, 2), heads=(2, 4, 8), depth=(2, 4, 18), pool='cls', dropout=0.2, emb_dropout=0.1, scale_dim=2):
+    def __init__(self, image_size, dim=32, kernels=(3, 3, 3, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(2, 4, 8, 16), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
@@ -165,11 +165,22 @@ class CvTransformer(hk.Module):
                              dim_head=self.dim, mlp_dim=dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
         xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size // 4, w=self.image_size // 4)
 
-        ###### Stage 3 ######
+        ##### Stage 3 ####
         scale = self.heads[2] // self.heads[1]
-        dim = scale * dim
+        dim = self.dim * scale
         xs = hk.Conv2D(dim, self.kernels[2], self.strides[2], w_init=init, b_init=hki.Constant(0))(xs)
         xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 8, w=self.image_size // 8)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0),
+                          offset_init=hki.Constant(0.0))(xs)
+        xs = TransformerStage(dim=dim, img_size=self.image_size // 8, depth=self.depth[1], heads=self.heads[1],
+                              dim_head=self.dim, mlp_dim=dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
+        xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size // 8, w=self.image_size // 8)
+
+        ###### Stage 4 ######
+        scale = self.heads[3] // self.heads[2]
+        dim = scale * dim
+        xs = hk.Conv2D(dim, self.kernels[3], self.strides[3], w_init=init, b_init=hki.Constant(0))(xs)
+        xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 16, w=self.image_size // 16)
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
 
         b, n, _ = xs.shape
@@ -178,7 +189,7 @@ class CvTransformer(hk.Module):
         cls_tokens = einops.repeat(cls_t, '() n d -> b n d', b=b)
         xs = jnp.concatenate((cls_tokens, xs), axis=1)
 
-        xs = TransformerStage(dim=dim, img_size=self.image_size // 8, depth=self.depth[2],
+        xs = TransformerStage(dim=dim, img_size=self.image_size // 16, depth=self.depth[2],
                               heads=self.heads[2],
                               dim_head=self.dim, mlp_dim=dim * self.scale_dim,
                               dropout=self.dropout, last_stage=True)(xs, is_training)
@@ -187,7 +198,7 @@ class CvTransformer(hk.Module):
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
         out = hk.Linear(self.num_classes)(xs)
-        return out # - logsumexp(out, axis=1, keepdims=True)
+        return out - logsumexp(out, axis=1, keepdims=True)
 
 # Load dataset
 with open('../data/digits/data2.dict', 'rb') as f:
@@ -262,17 +273,17 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     labels = jnn.one_hot(b, num_classes=num_classes)
     labels = optax.smooth_labels(labels, 2e-2)
 
-    # ce = -labels * logits
-    #
-    # # CE loss
-    # ce_loss = jnp.sum(ce, axis=1)
-    # ce_loss = jnp.mean(ce_loss, axis=0)
+    ce = -labels * logits
+
+    # CE loss
+    ce_loss = jnp.sum(ce, axis=1)
+    ce_loss = jnp.mean(ce_loss, axis=0)
 
     # Weight decay
     l2_loss = 0.1 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     l1_loss = jnp.mean(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
-    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-16 * (l2_loss + l1_loss), state
+    return ce_loss + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
