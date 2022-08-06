@@ -184,7 +184,7 @@ class CvTransformer(hk.Module):
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
         out = hk.Linear(self.num_classes)(xs)
-        return out - logsumexp(out, axis=1)
+        return out - logsumexp(out, axis=1, keepdims=True)
 
 # Load dataset
 with open('../data/digits/data2.dict', 'rb') as f:
