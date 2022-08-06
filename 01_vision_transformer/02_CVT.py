@@ -1,6 +1,5 @@
 import functools as ft
 import pickle
-import os
 
 import jax
 import jax.nn as jnn
@@ -32,7 +31,8 @@ class SepConv2d(hk.Module):
         self.padding = padding
 
     def __call__(self, x, is_training: bool):
-        x = hk.Conv2D(output_channels=self.in_channels, kernel_shape=self.kernel_size, stride=self.stride, padding=self.padding, name="depthwise")(x)
+        init = hki.VarianceScaling(1.0)
+        x = hk.Conv2D(output_channels=self.in_channels, kernel_shape=self.kernel_size, stride=self.stride, padding=self.padding, w_init=init, b_init=hki.Constant(1e-6), name="depthwise")(x)
         x = hk.BatchNorm(create_scale=True, create_offset=True, decay_rate=0.9, scale_init=hki.TruncatedNormal(1e-6, 1.0), offset_init=hki.RandomNormal(1e-6))(x, is_training)
         return hk.Conv2D(output_channels=self.in_channels, kernel_shape=self.kernel_size, name="pointwise")(x)
 
@@ -46,10 +46,11 @@ class FeedForward(hk.Module):
 
     def __call__(self, x, is_training: bool):
         dropout = self.dropout if is_training else 0.0
-        x = hk.Linear(output_size=self.hidden_dim)(x)
+        init = hki.VarianceScaling(1.0)
+        x = hk.Linear(output_size=self.hidden_dim, w_init=init, b_init=hki.Constant(1e-6))(x)
         x = jnn.gelu(x)
         x = hk.dropout(hk.next_rng_key(), dropout, x)
-        x = hk.Linear(output_size=self.dim)(x)
+        x = hk.Linear(output_size=self.dim, w_init=init, b_init=hki.Constant(1e-6))(x)
         return hk.dropout(hk.next_rng_key(), dropout, x)
 
 
@@ -73,6 +74,7 @@ class ConvAttention(hk.Module):
     def __call__(self, x, is_training: bool):
         dropout = self.dropout if is_training else 0.0
 
+        init = hki.VarianceScaling(1.0)
         b, n, _ = x.shape
         h = self.heads
 
@@ -103,7 +105,7 @@ class ConvAttention(hk.Module):
         out = einops.rearrange(out, 'b h n d -> b n (h d)')
         if not self.project_out:
             return out
-        out = hk.Linear(self.dim)(out)
+        out = hk.Linear(self.dim, w_init=init, b_init=hki.Constant(0.0))(out)
         return hk.dropout(hk.next_rng_key(), dropout, out)
 
 
@@ -121,9 +123,9 @@ class TransformerStage(hk.Module):
 
     def __call__(self, x, is_training: bool):
         for i in range(self.depth):
-            a = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(ConvAttention(self.dim, self.img_size, heads=self.heads, dropout=self.dropout, last_stage=self.last_stage)(x, is_training))
+            a = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(ConvAttention(self.dim, self.img_size, heads=self.heads, dropout=self.dropout, last_stage=self.last_stage)(x, is_training))
             x = x + a
-            b = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(FeedForward(dim=self.dim, hidden_dim=self.mlp_dim, dropout=self.dropout)(x, is_training))
+            b = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(FeedForward(dim=self.dim, hidden_dim=self.mlp_dim, dropout=self.dropout)(x, is_training))
             x = x + b
         return x
 
@@ -145,19 +147,20 @@ class CvTransformer(hk.Module):
         self.scale_dim = scale_dim
 
     def __call__(self, img, is_training):
+        init = hki.VarianceScaling(1.0)
         #### Stage 1 ####
-        xs = hk.Conv2D(self.dim, self.kernels[0], self.strides[0])(img)
+        xs = hk.Conv2D(self.dim, self.kernels[0], self.strides[0], w_init=init, b_init=hki.Constant(0))(img)
         xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size//2, w=self.image_size//2)
-        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
         xs = TransformerStage(dim=self.dim, img_size=self.image_size//2, depth=self.depth[0], heads=self.heads[0], dim_head=self.dim, mlp_dim=self.dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
         xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size//2, w=self.image_size//2)
 
         ##### Stage 2 ####
         scale = self.heads[1] // self.heads[0]
         dim = self.dim * scale
-        xs = hk.Conv2D(dim, self.kernels[1], self.strides[1])(xs)
+        xs = hk.Conv2D(dim, self.kernels[1], self.strides[1], w_init=init, b_init=hki.Constant(0))(xs)
         xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 4, w=self.image_size // 4)
-        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
         xs = TransformerStage(dim=dim, img_size=self.image_size // 4, depth=self.depth[1], heads=self.heads[1],
                              dim_head=self.dim, mlp_dim=dim * self.scale_dim, dropout=self.dropout)(xs, is_training)
         xs = einops.rearrange(xs, 'b (h w) c -> b h w c', h=self.image_size // 4, w=self.image_size // 4)
@@ -165,9 +168,9 @@ class CvTransformer(hk.Module):
         ###### Stage 3 ######
         scale = self.heads[2] // self.heads[1]
         dim = scale * dim
-        xs = hk.Conv2D(dim, self.kernels[2], self.strides[2])(xs)
+        xs = hk.Conv2D(dim, self.kernels[2], self.strides[2], w_init=init, b_init=hki.Constant(0))(xs)
         xs = einops.rearrange(xs, 'b h w c -> b (h w) c', h=self.image_size // 8, w=self.image_size // 8)
-        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
 
         b, n, _ = xs.shape
 
@@ -182,7 +185,7 @@ class CvTransformer(hk.Module):
 
         xs = jnp.mean(xs, axis=1) if self.pool == 'mean' else xs[:, 0, :]
 
-        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True)(xs)
+        xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
         out = hk.Linear(self.num_classes)(xs)
         return out # - logsumexp(out, axis=1, keepdims=True)
 
