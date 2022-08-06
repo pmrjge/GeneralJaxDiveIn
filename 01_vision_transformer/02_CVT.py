@@ -131,7 +131,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=32, kernels=(3, 3, 3, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(2, 4, 8, 16), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
+    def __init__(self, image_size, dim=16, kernels=(3, 2, 2, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(4, 8, 16, 32), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
