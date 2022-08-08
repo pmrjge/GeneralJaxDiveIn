@@ -131,7 +131,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=16, kernels=(3, 2, 2, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(4, 8, 16, 32), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
+    def __init__(self, image_size, dim=32, kernels=(3, 2, 2, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(4, 8, 16, 32), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
@@ -198,7 +198,7 @@ class CvTransformer(hk.Module):
 
         xs = hk.LayerNorm(-1, create_scale=True, create_offset=True, scale_init=hki.Constant(1.0), offset_init=hki.Constant(0.0))(xs)
         out = hk.Linear(self.num_classes)(xs)
-        return out - logsumexp(out, axis=1, keepdims=True)
+        return out
 
 # Load dataset
 with open('../data/digits/data2.dict', 'rb') as f:
@@ -273,17 +273,11 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
     labels = jnn.one_hot(b, num_classes=num_classes)
     labels = optax.smooth_labels(labels, 2e-2)
 
-    ce = -labels * logits
-
-    # CE loss
-    ce_loss = jnp.sum(ce, axis=1)
-    ce_loss = jnp.mean(ce_loss, axis=0)
-
     # Weight decay
-    l2_loss = 0.1 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
+    l2_loss = 0.5 * jnp.mean(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
     l1_loss = jnp.mean(jnp.array([jnp.sum(jnp.abs(p)) for p in jax.tree_util.tree_leaves(params)], dtype=jnp.float32))
 
-    return ce_loss + 1e-14 * (l2_loss + l1_loss), state
+    return jnp.mean(optax.softmax_cross_entropy(logits, labels)) + 1e-14 * (l2_loss + l1_loss), state
 
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
