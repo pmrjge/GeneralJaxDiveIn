@@ -131,7 +131,7 @@ class TransformerStage(hk.Module):
 
 
 class CvTransformer(hk.Module):
-    def __init__(self, image_size, dim=32, kernels=(3, 2, 2, 2), strides=(2, 2, 2, 2), heads=(2, 4, 8, 16), depth=(4, 8, 16, 32), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
+    def __init__(self, image_size, dim=64, kernels=(3, 2, 2, 2), strides=(2, 2, 2, 2), heads=(1, 2, 4, 8), depth=(1, 2, 4, 16), pool='cls', dropout=0.3, emb_dropout=0.1, scale_dim=2):
         super().__init__("transformer")
         assert pool in {'cls', 'mean'}, 'pool type must be either cls (cls token) or mean (mean pooling)'
         self.pool = pool
@@ -235,7 +235,7 @@ batch_size = 8
 process_gen = process_epoch_gen(x, y, batch_size, jax.local_device_count())
 
 
-def build_forward_fn(image_size=32):
+def build_forward_fn(image_size=64):
     def forward_fn(dgt: jnp.ndarray, *, is_training: bool) -> jnp.ndarray:
         return CvTransformer(image_size)(dgt, is_training=is_training)
 
@@ -282,7 +282,7 @@ def ce_loss_fn(forward_fn, params, state, rng, a, b, num_classes: int = 10):
 
 loss_fn = ft.partial(ce_loss_fn, l_apply)
 
-learning_rate = 3e-4
+learning_rate = 1e-4
 grad_clip_value = 1.0
 # scheduler = optax.exponential_decay(init_value=learning_rate, transition_steps=6000, decay_rate=0.99)
 
